@@ -151,8 +151,11 @@ export class ZipStorage<T> {
 
   async init() {
     if (this.initialized) return;
-    this.entries = await this.archive.getEntries();
-    for (let entry of this.entries) {
+
+    this.entries = [];
+    const it = this.archive.getEntriesGenerator();
+    for await (let entry of it) {
+      this.entries.push(entry);
       if (entry.filename == FileIndexEntry.FILE_NAME) {
         const rawIndex = JSON.parse(
           await (await RemoteBlob.fromEntry(this.reader, entry)).text(),
@@ -160,6 +163,16 @@ export class ZipStorage<T> {
         this.fileIndex = FileIndex.fromRaw(rawIndex);
       }
     }
+
+    // this.entries = await this.archive.getEntries();
+    // for (let entry of this.entries) {
+    //   if (entry.filename == FileIndexEntry.FILE_NAME) {
+    //     const rawIndex = JSON.parse(
+    //       await (await RemoteBlob.fromEntry(this.reader, entry)).text(),
+    //     );
+    //     this.fileIndex = FileIndex.fromRaw(rawIndex);
+    //   }
+    // }
     this.initialized = true;
   }
 }
@@ -192,6 +205,7 @@ export class RemoteBlob<T> {
       entry.offset,
       entry.offset + entry.uncompressedSize,
     );
+    console.log("Reading entry header for", entry)
     const headerSize = await readZipHeaderSize(blob);
     blob.start += headerSize;
     blob.end += headerSize;
@@ -242,7 +256,8 @@ export class RemoteBlob<T> {
   }
 
   async _read(): Promise<Uint8Array> {
-    if (this.source.init != undefined) await this.source.init();
+    // if (this.source.init) await this.source.init();
+    console.log("Issueing read for", this, " of size ", this.size)
     const buf = await this.source.readUint8Array(
       this.start,
       this.end - this.start,

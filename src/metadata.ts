@@ -2,7 +2,8 @@ import * as Arrow  from "apache-arrow";
 import * as ArrowFFI from  "arrow-js-ffi"
 import { ParquetFile, wasmMemory, FFIStream } from "parquet-wasm/bundler";
 
-import { binarySearch } from "./utils";
+import { binarySearch, binarySearchAll } from "./utils";
+import { bigIntToNumber } from "apache-arrow/util/bigint";
 
 export class SpectrumMetadata {
   handle: ParquetFile;
@@ -80,17 +81,56 @@ export class SpectrumMetadata {
     return this.initialized && this._spectra ? this._spectra.length : 0;
   }
 
-  get(index: number) {
+  getRecord(index: number | bigint) {
     if (index >= this.length) throw new Error("Index out of range")
-    let index_ = index;
+    let index_ = bigIntToNumber(index);
+    let index_n = BigInt(index)
     if (this.spectra == null) throw new Error("Invalid state");
-    const indexArr = this.spectra?.getChild("index") as Arrow.Vector<Arrow.Uint64>;
+
+    let indexArr = this.spectra?.getChild("index") as Arrow.Vector<Arrow.Uint64>;
     let row = indexArr.get(index_)
-    if (row != BigInt(index)) {
-        index_ = binarySearch(indexArr, BigInt(index));
-        row = indexArr.get(index_);
+    if (row != index_n) {
+        const offset = binarySearch(indexArr, index_n);
+        row = indexArr.get(offset);
     }
-    return this.spectra.get(index_)
+    const spectrumRecord = this.spectra.get(index_).toJSON()
+
+    indexArr = this.scans?.getChild("source_index") as Arrow.Vector<Arrow.Uint64>;
+    let offsets = binarySearchAll(indexArr, index_n);
+
+    if (offsets && this.scans) {
+        const scanRecords = Array.from(this.scans.slice(offsets[0], offsets[1])).map(e => e.toJSON());
+        spectrumRecord.scans = scanRecords;
+    }
+
+    if (this.precursors != null) {
+        indexArr = this.precursors?.getChild(
+          "source_index",
+        ) as Arrow.Vector<Arrow.Uint64>;
+        offsets = binarySearchAll(indexArr, index_n);
+        if (offsets) {
+          const scanRecords = this.precursors
+            .slice(offsets[0], offsets[1]);
+          spectrumRecord.precursors = Array.from(scanRecords).map(e => e.toJSON());
+        }
+    }
+
+    if (this.selectedIons != null) {
+      indexArr = this.selectedIons?.getChild(
+        "source_index",
+      ) as Arrow.Vector<Arrow.Uint64>;
+      offsets = binarySearchAll(indexArr, index_n);
+      if (offsets) {
+        const scanRecords = this.selectedIons
+          .slice(offsets[0], offsets[1])
+          .toJSON();
+        spectrumRecord.selectedIons = Array.from(scanRecords).map((e) =>
+          e.toJSON(),
+        );
+      }
+    }
+
+    return spectrumRecord
   }
 
 }
@@ -159,14 +199,18 @@ export class ChromatogramMetadata {
   }
 
   get length(): number {
-    return this.initialized && this._chromatograms ? this._chromatograms.length : 0;
+    return this.initialized && this._chromatograms
+      ? this._chromatograms.length
+      : 0;
   }
 
-  get(index: number) {
+  getRecord(index: number | bigint) {
     if (index >= this.length) throw new Error("Index out of range");
-    let index_ = index;
+    let index_ = bigIntToNumber(index);
     if (this.chromatograms == null) throw new Error("Invalid state");
-    const indexArr = this.chromatograms?.getChild("index") as Arrow.Vector<Arrow.Uint64>;
+    const indexArr = this.chromatograms?.getChild(
+      "index",
+    ) as Arrow.Vector<Arrow.Uint64>;
     let row = indexArr.get(index_);
     if (row != BigInt(index)) {
       index_ = binarySearch(indexArr, BigInt(index));

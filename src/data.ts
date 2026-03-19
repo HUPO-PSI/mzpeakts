@@ -115,9 +115,6 @@ export class GroupTagBounds {
     return this.start <= value_ && value_ <= this.end;
   }
 
-  toString(): string {
-    return `GroupTagBounds { key: ${this.key}, start: ${this.start}, end: ${this.end} }`;
-  }
 }
 
 // ---- RangeIndex ----
@@ -152,16 +149,9 @@ export class RangeIndex implements Iterable<GroupTagBounds> {
     return null;
   }
 
-  keysFor(index: bigint): bigint[] {
+  keysFor(index_: bigint): bigint[] {
+    const index = BigInt(index_)
     return this.ranges.filter((r) => r.contains(index)).map((r) => r.key);
-  }
-
-  toString(): string {
-    return (
-      `RowGroupIndex {\n` +
-      this.ranges.map((r) => `\t${r}`).join("\n") +
-      `\n}`
-    );
   }
 }
 
@@ -547,6 +537,11 @@ export class DataArraysReader implements AsyncIterable<[bigint, Arrow.Table]> {
     this.bufferContext = meta.context;
   }
 
+  static async fromParquet(handle: ParquetFile, context: BufferContext) {
+    const meta = await DataArraysReaderMeta.fromParquet(handle, context);
+    return new this(handle, meta)
+  }
+
   get arrayIndex(): ArrayIndex {
     return this.metadata.arrayIndex;
   }
@@ -580,7 +575,8 @@ export class DataArraysReader implements AsyncIterable<[bigint, Arrow.Table]> {
     throw new Error("Data layout not recognized");
   }
 
-  async readForIndex(key: bigint): Promise<Arrow.Table | null> {
+  async readForIndex(key_: bigint|number): Promise<Arrow.Table | null> {
+    const key = BigInt(key_)
     const rowGroups = this.rowGroupIndex.keysFor(key);
     if (rowGroups.length === 0) return null;
 
@@ -670,7 +666,7 @@ export class DataArraysIter
     this.initialized = true;
   }
 
-  async moveNextAsync(): Promise<boolean> {
+  private async moveNextAsync(): Promise<boolean> {
     if (!this.initialized) await this.initialize();
     if (this.entryPos >= this.entries.length) return false;
 

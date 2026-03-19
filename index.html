@@ -12,9 +12,9 @@
         window.arrowFFI = arrowFFI
         window.MZPeak = MZPeak;
 
-        window.reader = new MZPeak.store.ZipStorage(new MZPeak.zip.HttpRangeReader("/static/small.mzpeak"))
+        window.reader = await MZPeak.MZPeakReader.fromUrl("/static/small.mzpeak")
 
-        window.spectrumMeta = await MZPeak.SpectrumMetadata.fromParquet(await window.reader.spectrumMetadata())
+        //window.spectrumMeta = await MZPeak.SpectrumMetadata.fromParquet(await window.reader.spectrumMetadata())
     </script>
 </head>
 <body>
