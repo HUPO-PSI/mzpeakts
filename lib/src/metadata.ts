@@ -299,20 +299,27 @@ export class SpectrumMetadata extends MetadataReaderBase {
   }
 }
 
-export class ChromatogramMetadata {
-  handle: ParquetFile;
+export class ChromatogramMetadata extends MetadataReaderBase {
   _chromatograms: Arrow.Vector | null;
   _precursors: Arrow.Vector | null;
   _selectedIons: Arrow.Vector | null;
-  initialized: boolean = false;
 
   constructor(handle: ParquetFile) {
-    this.handle = handle;
+    super(handle);
     this._chromatograms = null;
     this._precursors = null;
     this._selectedIons = null;
-    this.initialized = false;
+  }
 
+  makeIteratorHelpers(): IteratorLookupTables {
+    const lookups: IteratorLookupTables = {};
+    if (this.precursors) {
+      lookups["precursors"] = buildBasicRecordTable(this.precursors);
+    }
+    if (this.selectedIons) {
+      lookups["selectedIons"] = buildBasicRecordTable(this.selectedIons);
+    }
+    return lookups;
   }
 
   static async fromParquet(handle: ParquetFile) {
@@ -322,21 +329,16 @@ export class ChromatogramMetadata {
 
   async init() {
     if (this.initialized) return this;
-    const tab = await this.handle.read();
-    const ffi = tab.intoFFI();
-    const mem = wasmMemory();
-    const arrowTab = ArrowFFI.parseTable(
-      mem.buffer,
-      ffi.arrayAddrs(),
-      ffi.schemaAddr(),
-      true
-    );
-    ffi.free()
+    const arrowTab = await this.readTable();
     this._chromatograms = arrowTab.getChild("chromatogram");
     this._precursors = arrowTab.getChild("precursor");
     this._selectedIons = arrowTab.getChild("selected_ion");
     this.initialized = true;
     return this;
+  }
+
+  protected get _mainStruct() {
+    return this.chromatograms;
   }
 
   get chromatograms() {

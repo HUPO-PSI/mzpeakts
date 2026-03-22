@@ -68,11 +68,14 @@ export class MZPeakReader<T> {
     if (!this.initialized) await this.init();
     const handle = await this.store.spectrumData();
     if (!handle) return null;
-    const dataReader = await DataArraysReader.fromParquet(handle, BufferContext.Spectrum);
+    const dataReader = await DataArraysReader.fromParquet(
+      handle,
+      BufferContext.Spectrum,
+    );
     if (this.spectrumMetadata)
-      dataReader.spacingModels = this.spectrumMetadata.loadSpacingModelIndex()
-    this._spectrumDataReader = dataReader
-    return dataReader
+      dataReader.spacingModels = this.spectrumMetadata.loadSpacingModelIndex();
+    this._spectrumDataReader = dataReader;
+    return dataReader;
   }
 
   async *enumerateSpectra() {
@@ -81,20 +84,20 @@ export class MZPeakReader<T> {
     if (!dataReader) return;
     const it = dataReader?.enumerate();
     let n = this.spectrumMetadata.length;
-    for(let i = 0; i < n; i++) {
-      const meta = this.spectrumMetadata.get(i)
-      await it.seek(BigInt(i))
-      let {done, value: data} = await it.next();
+    for (let i = 0; i < n; i++) {
+      const meta = this.spectrumMetadata.get(i);
+      await it.seek(BigInt(i));
+      let { done, value: data } = await it.next();
       if (done) return;
-      data = data[1]
+      data = data[1];
       if (data) {
-        console.log(data)
+        console.log(data);
         for (let i = 1; i < data.schema.fields.length; i++) {
           const colName = data.schema.fields[i].name;
           meta[colName] = data.getChildAt(i)?.toArray();
         }
       }
-      return meta
+      return meta;
     }
   }
 
@@ -119,15 +122,20 @@ export class MZPeakReader<T> {
   }
 
   async wavelengthSpectrumData() {
-    if (this._wavelengthSpectrumDataReader) return this._wavelengthSpectrumDataReader;
+    if (this._wavelengthSpectrumDataReader)
+      return this._wavelengthSpectrumDataReader;
     if (!this.initialized) await this.init();
     const handle = await this.store.wavelengthSpectrumData();
     if (!handle) return null;
-    this._wavelengthSpectrumDataReader = await DataArraysReader.fromParquet(handle, BufferContext.Spectrum);
+    this._wavelengthSpectrumDataReader = await DataArraysReader.fromParquet(
+      handle,
+      BufferContext.Spectrum,
+    );
     return this._wavelengthSpectrumDataReader;
   }
 
-  async getSpectrum(index: bigint) {
+  async getSpectrum(index_: bigint | number) {
+    const index = BigInt(index_);
     const meta = this.spectrumMetadata?.get(index);
     if (meta) {
       const handle = await this.spectrumData();
@@ -146,7 +154,8 @@ export class MZPeakReader<T> {
     return this.spectrumMetadata?.length ?? 0;
   }
 
-  async getChromatogram(index: bigint) {
+  async getChromatogram(index_: bigint | number) {
+    const index = BigInt(index_);
     const meta = this.chromatogramMetadata?.get(index);
     if (meta) {
       const handle = await this.chromatogramData();
@@ -165,7 +174,8 @@ export class MZPeakReader<T> {
     return this.chromatogramMetadata?.length ?? 0;
   }
 
-  async getWavelengthSpectrum(index: bigint) {
+  async getWavelengthSpectrum(index_: bigint | number) {
+    const index = BigInt(index_);
     const meta = this.wavelengthMetadata?.get(index);
     if (meta) {
       const handle = await this.wavelengthSpectrumData();
@@ -182,5 +192,9 @@ export class MZPeakReader<T> {
 
   get numWavelengthSpectra() {
     return this.wavelengthMetadata?.length ?? 0;
+  }
+
+  async at(index: bigint|number) {
+    return await this.getSpectrum(index)
   }
 }

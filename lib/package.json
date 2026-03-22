@@ -1,5 +1,5 @@
 {
-  "name": "mzpeak_ts",
+  "name": "mzpeakts",
   "version": "0.1.0",
   "description": "",
   "main": "src/index.ts",
@@ -11,7 +11,7 @@
     "@zip.js/zip.js": "^2.8.23",
     "apache-arrow": "^21.1.0",
     "arrow-js-ffi": "^0.4.3",
-    "parquet-wasm": "vendor/parquet-wasm/pkg"
+    "parquet-wasm": "file:vendor/parquet-wasm/pkg"
   },
   "scripts": {
     "dev": "vite",
