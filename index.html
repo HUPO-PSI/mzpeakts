@@ -12,12 +12,25 @@
         window.arrowFFI = arrowFFI
         window.MZPeak = MZPeak;
 
-        window.reader = await MZPeak.MZPeakReader.fromUrl("/static/small.mzpeak")
-
-        //window.spectrumMeta = await MZPeak.SpectrumMetadata.fromParquet(await window.reader.spectrumMetadata())
+        window.reader = await MZPeak.MZPeakReader.fromUrl("/static/20240224_L3.dp2x.mzpeak")
+        window.dataReader = window.reader.spectrumData()
     </script>
 </head>
 <body>
     Hello
+    <input type="file" id="mzpeak-file" name="mzpeak-file" />
+    <script>
+        const fileObj = document.querySelector("#mzpeak-file")
+        fileObj.addEventListener("change", async function(e) {
+            console.log(this.files)
+            if (this.files.length) {
+                window.reader = await MZPeak.MZPeakReader.fromBlob(this.files[0])
+                window.dataReader = await window.reader.spectrumData()
+            } else {
+                window.reader = null
+                window.dataReader = null
+            }
+        })
+    </script>
 </body>
 </html>

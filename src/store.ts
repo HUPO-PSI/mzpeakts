@@ -1,5 +1,7 @@
 import * as zip from "@zip.js/zip.js";
-import { ParquetFile } from "parquet-wasm/bundler";
+import { ParquetFile, setPanicHook } from "parquet-wasm";
+
+setPanicHook();
 
 export enum DataKind {
   DataArrays = "data arrays",
@@ -163,16 +165,6 @@ export class ZipStorage<T> {
         this.fileIndex = FileIndex.fromRaw(rawIndex);
       }
     }
-
-    // this.entries = await this.archive.getEntries();
-    // for (let entry of this.entries) {
-    //   if (entry.filename == FileIndexEntry.FILE_NAME) {
-    //     const rawIndex = JSON.parse(
-    //       await (await RemoteBlob.fromEntry(this.reader, entry)).text(),
-    //     );
-    //     this.fileIndex = FileIndex.fromRaw(rawIndex);
-    //   }
-    // }
     this.initialized = true;
   }
 }
@@ -183,7 +175,7 @@ export async function readZipHeaderSize<T>(blob: RemoteBlob<T>) {
     const view = new DataView(arrayBuffer);
     let offset = 30;
     const nameSize = view.getUint16(26, true)
-    const extraSize = view.getUint16(28, true);
+    const extraSize = view.getUint16(28, true)
     return offset + nameSize + extraSize
 }
 
@@ -205,7 +197,6 @@ export class RemoteBlob<T> {
       entry.offset,
       entry.offset + entry.uncompressedSize,
     );
-    console.log("Reading entry header for", entry)
     const headerSize = await readZipHeaderSize(blob);
     blob.start += headerSize;
     blob.end += headerSize;
@@ -251,13 +242,11 @@ export class RemoteBlob<T> {
     }
   }
 
-  get size(): number {
+  get size() {
     return this.end - this.start;
   }
 
   async _read(): Promise<Uint8Array> {
-    // if (this.source.init) await this.source.init();
-    console.log("Issueing read for", this, " of size ", this.size)
     const buf = await this.source.readUint8Array(
       this.start,
       this.end - this.start,

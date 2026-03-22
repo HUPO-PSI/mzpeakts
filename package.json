@@ -11,7 +11,7 @@
     "@zip.js/zip.js": "^2.8.23",
     "apache-arrow": "^21.1.0",
     "arrow-js-ffi": "^0.4.3",
-    "parquet-wasm": "^0.7.1"
+    "parquet-wasm": "vendor/parquet-wasm/pkg"
   },
   "scripts": {
     "dev": "vite",
