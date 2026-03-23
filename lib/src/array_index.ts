@@ -137,15 +137,31 @@ export class ArrayIndexEntry {
       this.unitCURIE === other.unitCURIE
     );
   }
+
+  get fieldName() {
+    const tokens = this.path.split(".")
+    return tokens[tokens.length - 1]
+  }
 }
 
 export class ArrayIndex {
   prefix: string;
   entries: ArrayIndexEntry[];
 
+  fieldToName: Map<string, string>
+
   constructor(prefix: string = "?", entries: ArrayIndexEntry[] = []) {
     this.prefix = prefix;
     this.entries = entries;
+    this.fieldToName = new Map()
+    this.rebuildFieldNameMap()
+  }
+
+  rebuildFieldNameMap() {
+    this.fieldToName.clear()
+    for(let e of this.entries) {
+      this.fieldToName.set(e.fieldName, e.arrayName)
+    }
   }
 
   static fromJSON(obj: any): ArrayIndex {

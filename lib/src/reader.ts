@@ -1,8 +1,9 @@
 import { ZipStorage } from "./store"
-import { SpectrumMetadata, ChromatogramMetadata } from './metadata';
+import { SpectrumMetadata, ChromatogramMetadata, FileMetadata } from './metadata';
 import { HttpRangeReader, BlobReader } from "@zip.js/zip.js";
-import { DataArraysReader } from "./data";
+import { DataArraysReader, packTableIntoDataArrays } from "./data";
 import { BufferContext } from "./array_index";
+
 
 export class MZPeakReader<T> {
   store: ZipStorage<T>;
@@ -14,9 +15,16 @@ export class MZPeakReader<T> {
   _spectrumPeaksReader: DataArraysReader | null = null;
   _chromatogramDataReader: DataArraysReader | null = null;
   _wavelengthSpectrumDataReader: DataArraysReader | null = null;
+  _fileMetadata: FileMetadata | undefined = undefined
 
   constructor(store: ZipStorage<T>) {
     this.store = store;
+  }
+
+  get fileMetadata() {
+    if (this._fileMetadata != undefined) return this._fileMetadata
+    this._fileMetadata = this.spectrumMetadata?.fileMetadata()
+    return this._fileMetadata
   }
 
   static async fromStore<T>(store: ZipStorage<T>) {
@@ -90,12 +98,9 @@ export class MZPeakReader<T> {
       let { done, value: data } = await it.next();
       if (done) return;
       data = data[1];
+      console.log(data)
       if (data) {
-        console.log(data);
-        for (let i = 1; i < data.schema.fields.length; i++) {
-          const colName = data.schema.fields[i].name;
-          meta[colName] = data.getChildAt(i)?.toArray();
-        }
+        meta["dataArrays"] = packTableIntoDataArrays(data);
       }
       return meta;
     }
@@ -141,10 +146,7 @@ export class MZPeakReader<T> {
       const handle = await this.spectrumData();
       const data = await handle?.get(index);
       if (data) {
-        for (let i = 1; i < data.schema.fields.length; i++) {
-          const colName = data.schema.fields[i].name;
-          meta[colName] = data.getChildAt(i)?.toArray();
-        }
+        meta["dataArrays"] = packTableIntoDataArrays(data);
       }
       return meta;
     }
@@ -161,10 +163,7 @@ export class MZPeakReader<T> {
       const handle = await this.chromatogramData();
       const data = await handle?.get(index);
       if (data) {
-        for (let i = 1; i < data.schema.fields.length; i++) {
-          const colName = data.schema.fields[i].name;
-          meta[colName] = data.getChildAt(i)?.toArray();
-        }
+        meta["dataArrays"] = packTableIntoDataArrays(data);
       }
       return meta;
     }
@@ -181,10 +180,7 @@ export class MZPeakReader<T> {
       const handle = await this.wavelengthSpectrumData();
       const data = await handle?.get(index);
       if (data) {
-        for (let i = 1; i < data.schema.fields.length; i++) {
-          const colName = data.schema.fields[i].name;
-          meta[colName] = data.getChildAt(i)?.toArray();
-        }
+        meta["dataArrays"] = packTableIntoDataArrays(data);
       }
       return meta;
     }
@@ -194,7 +190,15 @@ export class MZPeakReader<T> {
     return this.wavelengthMetadata?.length ?? 0;
   }
 
-  async at(index: bigint|number) {
-    return await this.getSpectrum(index)
+  async at(index: bigint | number) {
+    return await this.getSpectrum(index);
+  }
+
+  async get(index: bigint | number) {
+    return await this.getSpectrum(index);
+  }
+
+  get length() {
+    return this.numSpectra;
   }
 }
