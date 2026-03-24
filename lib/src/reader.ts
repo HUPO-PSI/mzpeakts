@@ -201,4 +201,8 @@ export class MZPeakReader<T> {
   get length() {
     return this.numSpectra;
   }
+
+  *[Symbol.asyncIterator]() {
+    return this.enumerateSpectra()
+  }
 }

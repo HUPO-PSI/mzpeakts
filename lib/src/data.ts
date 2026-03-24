@@ -286,9 +286,13 @@ function interpolateNulls(
       chunk.set(0, (chunk.get(1) ?? 0) - dx);
       chunk.set(chunk.length - 1, (chunk.get(chunk.length - 2) ?? 0) + dx);
     }
+    // console.log(start, end, chunkReal)
     chunks.push(chunk);
   }
-  return combineVectors(chunks);
+  // const result = Arrow.vectorFromArray<Arrow.Float>(chunks);
+  const result = combineVectors(chunks)
+  // console.log(result)
+  return result
 }
 
 // ---- GroupTagBounds ----
@@ -357,7 +361,7 @@ export class DataArraysReaderMeta {
   entrySpanIndex: RangeIndex;
   format: BufferFormat;
   spacingModels: Map<bigint, SpacingInterpolationModel> | null;
-  ready: Promise<boolean> | boolean;
+  spanIndexReady: boolean;
 
   constructor(
     context: BufferContext,
@@ -366,22 +370,15 @@ export class DataArraysReaderMeta {
     entrySpanIndex: RangeIndex,
     format: BufferFormat,
     spacingModels: Map<bigint, SpacingInterpolationModel> | null = null,
-    ready: Promise<boolean> | boolean = false,
+    spanIndexReady: boolean = false,
   ) {
-    if (ready != true && ready != false) {
-      ready = ready.then((value) => {
-        this.ready = value;
-        // console.log("Finished asynchronously loading indices")
-        return value;
-      });
-    }
     this.context = context;
     this.arrayIndex = arrayIndex;
     this.rowGroupIndex = rowGroupIndex;
     this.entrySpanIndex = entrySpanIndex;
     this.format = format;
     this.spacingModels = spacingModels;
-    this.ready = ready;
+    this.spanIndexReady = spanIndexReady;
   }
 
   static async fromParquet(
@@ -445,66 +442,6 @@ export class DataArraysReaderMeta {
     }
 
     const rowSpanBounds: GroupTagBounds[] = [];
-    const processing = async () => {
-      // Build RangeIndex and EntrySpanIndex by scanning index column per row group.
-      // This can be time intensive, so let's put this task on the backburner and use the slower
-      // row group-level scanning while we are waiting
-      const idxColName = bufferContextIndexName(context);
-
-      let offset = 0n;
-      let lastIdx = 0n;
-      let spanStart = 0n;
-      let seenFirst = false;
-      for (let i = 0; i < nRowGroups; i++) {
-        const batches = await readArrowBatches(
-          handle,
-          [i],
-          [`${arrayIndex.prefix}.${idxColName}`],
-        );
-        let rgMin: bigint | null = null;
-        let rgMax: bigint | null = null;
-
-        for (const batch of batches) {
-          const rootStruct = rootStructOf(batch);
-          if (rootStruct == null) {
-            offset += BigInt(batch.numRows);
-            continue;
-          }
-          const indexVec = rootStruct.getChild(
-            idxColName,
-          ) as Arrow.Vector<Arrow.Uint64> | null;
-          if (indexVec == null) {
-            offset += BigInt(rootStruct.length);
-            continue;
-          }
-
-          for (let r = 0; r < indexVec.length; r++) {
-            const srcIdx = indexVec.get(r);
-            offset += 1n;
-            if (srcIdx == null) continue;
-            if (rgMin == null || srcIdx < rgMin) rgMin = srcIdx;
-            if (rgMax == null || srcIdx > rgMax) rgMax = srcIdx;
-            if (!seenFirst) {
-              lastIdx = srcIdx;
-              spanStart = offset - 1n;
-              seenFirst = true;
-            } else if (srcIdx !== lastIdx) {
-              rowSpanBounds.push(
-                new GroupTagBounds(lastIdx, spanStart, offset - 1n),
-              );
-              lastIdx = srcIdx;
-              spanStart = offset;
-            }
-          }
-        }
-      }
-      if (seenFirst) {
-        rowSpanBounds.push(new GroupTagBounds(lastIdx, spanStart, offset - 1n));
-      }
-      // console.log("Parquet indices ready")
-      return true;
-    };
-
     return new DataArraysReaderMeta(
       context,
       arrayIndex,
@@ -512,8 +449,74 @@ export class DataArraysReaderMeta {
       new RangeIndex(rowSpanBounds),
       format,
       null,
-      processing(),
+      false,
     );
+  }
+
+  async buildSpanIndex(handle: ParquetFile) {
+    // Build RangeIndex and EntrySpanIndex by scanning index column per row group.
+    // This can be time intensive, so let's put this task on the backburner and use the slower
+    // row group-level scanning while we are waiting
+    const idxColName = bufferContextIndexName(this.context);
+    this.entrySpanIndex.ranges = [];
+
+    const pqMeta = handle.metadata();
+    const nRowGroups = pqMeta.numRowGroups();
+    if (nRowGroups === 0) throw new Error("Empty Parquet file");
+
+    let offset = 0n;
+    let lastIdx = 0n;
+    let spanStart = 0n;
+    let seenFirst = false;
+    for (let i = 0; i < nRowGroups; i++) {
+      const batches = await readArrowBatches(
+        handle,
+        [i],
+        [`${this.arrayIndex.prefix}.${idxColName}`],
+      );
+      let rgMin: bigint | null = null;
+      let rgMax: bigint | null = null;
+
+      for (const batch of batches) {
+        const rootStruct = rootStructOf(batch);
+        if (rootStruct == null) {
+          offset += BigInt(batch.numRows);
+          continue;
+        }
+        const indexVec = rootStruct.getChild(
+          idxColName,
+        ) as Arrow.Vector<Arrow.Uint64> | null;
+        if (indexVec == null) {
+          offset += BigInt(rootStruct.length);
+          continue;
+        }
+
+        for (let r = 0; r < indexVec.length; r++) {
+          const srcIdx = indexVec.get(r);
+          offset += 1n;
+          if (srcIdx == null) continue;
+          if (rgMin == null || srcIdx < rgMin) rgMin = srcIdx;
+          if (rgMax == null || srcIdx > rgMax) rgMax = srcIdx;
+          if (!seenFirst) {
+            lastIdx = srcIdx;
+            spanStart = offset - 1n;
+            seenFirst = true;
+          } else if (srcIdx !== lastIdx) {
+            this.entrySpanIndex.ranges.push(
+              new GroupTagBounds(lastIdx, spanStart, offset - 1n),
+            );
+            lastIdx = srcIdx;
+            spanStart = offset;
+          }
+        }
+      }
+    }
+    if (seenFirst) {
+      this.entrySpanIndex.ranges.push(
+        new GroupTagBounds(lastIdx, spanStart, offset - 1n),
+      );
+    }
+    return true;
   }
 }
 
@@ -593,6 +596,7 @@ export class BaseLayoutReader {
     for (let i = 0; i < idxVec.length; i++) {
       if (idxVec.get(i) === entryIndex) selectedRows.push(i);
     }
+    console.log(`Selecting rows  ${selectedRows}`)
     return this.processSelectedRows(entryIndex, rootStruct, selectedRows);
   }
 
@@ -603,9 +607,11 @@ export class BaseLayoutReader {
   ): Promise<Arrow.Table> {
     let rowCountRead = 0n;
     const accumulated: Record<string, Arrow.Vector[]> = {};
-
+    console.log(`Reading for ${entryIndex}, ${startFrom} - ${endAt}`)
     let nBats = 0;
+    let ctr = 0
     for await (const batch of this.batches) {
+      ctr += 1
       const rootStruct = rootStructOf(batch);
       if (rootStruct == null) {
         rowCountRead += BigInt(batch.numRows);
@@ -620,7 +626,10 @@ export class BaseLayoutReader {
         }
       } else {
         const firstIdxOf = firstNotNull(indexVectorOf(rootStruct));
-        if (firstIdxOf != null && firstIdxOf > entryIndex) break;
+        if (firstIdxOf != null && firstIdxOf > entryIndex) {
+          console.log(`First index ${firstIdxOf} of batch ${ctr} greater than ${entryIndex}`)
+          break
+        };
       }
 
       if (endAt != null) {
@@ -881,23 +890,24 @@ export class DataArraysReader {
     throw new Error("Data layout not recognized");
   }
 
-  async checkIndices() {
-    if (this.metadata.ready != true) {
-      this.metadata.ready = await this.metadata.ready;
-      if (!this.metadata.ready) {
-        throw new Error("Parquet indices failed to load!");
+  async buildSpanIndex() {
+    if (!this.metadata.spanIndexReady) {
+      this.metadata.spanIndexReady = await this.metadata.buildSpanIndex(
+        this.handle,
+      );
+      if (!this.metadata.spanIndexReady) {
+        throw new Error("Span indices failed to load!");
       }
     }
   }
 
   indicesReady() {
-    return this.metadata.ready == true;
+    return this.metadata.spanIndexReady;
   }
 
   async get(key_: bigint | number): Promise<Arrow.Table | null> {
     const key = BigInt(key_);
     if (this.indicesReady()) {
-      await this.checkIndices();
       const rowGroups = this.rowGroupIndex.keysFor(key);
       if (rowGroups.length === 0) return null;
 
@@ -939,9 +949,7 @@ export class DataArraysReader {
     return new DataArraysIter(this, streamArrowBatches(this.handle));
   }
 
-  [Symbol.asyncIterator](): AsyncIterator<
-    [bigint, Arrow.Table | ColumnMap]
-  > {
+  [Symbol.asyncIterator](): AsyncIterator<[bigint, Arrow.Table | ColumnMap]> {
     return this.enumerate();
   }
 }
@@ -1112,24 +1120,23 @@ export class DataArraysIter
     return true;
   }
 
-  async next(): Promise<
-    IteratorResult<[bigint, Arrow.Table | ColumnMap]>
-  > {
+  async next(): Promise<IteratorResult<[bigint, Arrow.Table | ColumnMap]>> {
     const hasNext = await this.moveNextAsync();
     if (!hasNext) return { done: true, value: undefined as any };
-    const value = this._current
-    if (value == null) throw new Error("Cannot be null")
+    const value = this._current;
+    if (value == null) throw new Error("Cannot be null");
     const final: ColumnMap = {};
     for (let [k, v] of Object.entries(value[1])) {
       final[this.layoutReader.arrayIndex.fieldToName.get(k) ?? k] = v;
     }
-    const payload: [bigint, Arrow.Table] = [value[0], Arrow.tableFromArrays(final as any) as Arrow.Table];
+    const payload: [bigint, Arrow.Table] = [
+      value[0],
+      Arrow.tableFromArrays(final as any) as Arrow.Table,
+    ];
     return { done: false, value: payload };
   }
 
-  [Symbol.asyncIterator](): AsyncIterator<
-    [bigint, Arrow.Table | ColumnMap]
-  > {
+  [Symbol.asyncIterator](): AsyncIterator<[bigint, Arrow.Table | ColumnMap]> {
     return this;
   }
 }
