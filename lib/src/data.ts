@@ -80,7 +80,7 @@ async function* streamArrowBatches(
   columns?: string[],
   options_?: ReaderOptions,
 ) {
-  const options = options_ ?? {};
+  const options = options_ ?? {batchSize: 2048};
   options.rowGroups = rowGroups;
   if (columns) options.columns = columns;
   const tabStream = (await handle.stream(options)).values();
@@ -227,7 +227,7 @@ export function findMaskedPairs(
   }
   if (nullHere.length % 2 != 0) {
     throw new Error(
-      `Number of pairs must be even, got ${nullHere.length}: ${nullHere}, ${maskedVector}`,
+      `Number of pairs must be even, got ${nullHere.length}: ${nullHere}`,
     );
   }
   const result: [number, number][] = [];
@@ -673,7 +673,6 @@ export class BaseLayoutReader {
           )
         } else {
           accumulated[k].push(v);
-          console.log(k, accumulated[k].map(x => x.length).reduce((last, x) => last + x));
           sizes.push(
             accumulated[k].map((x) => x.length).reduce((last, x) => last + x),
           );
@@ -733,26 +732,6 @@ export class PointLayoutReader extends BaseLayoutReader {
       rootStruct,
       selectedRows,
     );
-
-    // for (const entry of this.arrayIndex.entries) {
-    //   const fieldName = entry.fieldName;
-
-    //   if (entry.transform === NULL_ZERO_CURIE) {
-    //     base[fieldName] = nullToZero(base[fieldName]);
-    //   } else if (
-    //     entry.transform === NULL_INTERPOLATE_CURIE &&
-    //     this.spacingModels?.has(entryIndex)
-    //   ) {
-    //     const filled = interpolateNulls(
-    //       base[fieldName],
-    //       this.spacingModels.get(entryIndex)!,
-    //     );
-    //     console.log(filled.get(0), filled.get(filled.length - 1))
-    //     // debugger;
-    //     base[fieldName] = filled
-    //   }
-    // }
-
     return base;
   }
 }
@@ -1125,7 +1104,7 @@ export class DataArraysIter
         }
       }
     } else {
-      this.currentBatch.slice(n, this.currentBatch.length);
+      this.currentBatch = this.currentBatch.slice(n, this.currentBatch.length);
     }
     return chunk;
   }

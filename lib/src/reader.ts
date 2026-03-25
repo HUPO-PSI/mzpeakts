@@ -90,19 +90,18 @@ export class MZPeakReader<T> {
     if (!this.spectrumMetadata) return;
     const dataReader = await this.spectrumData();
     if (!dataReader) return;
-    const it = dataReader?.enumerate();
+    const it = dataReader.enumerate();
     let n = this.spectrumMetadata.length;
     for (let i = 0; i < n; i++) {
       const meta = this.spectrumMetadata.get(i);
       await it.seek(BigInt(i));
       let { done, value: data } = await it.next();
-      if (done) return;
+      if (done) break;
       data = data[1];
-      console.log(data)
       if (data) {
         meta["dataArrays"] = packTableIntoDataArrays(data);
       }
-      return meta;
+      yield meta;
     }
   }
 
@@ -202,7 +201,9 @@ export class MZPeakReader<T> {
     return this.numSpectra;
   }
 
-  *[Symbol.asyncIterator]() {
-    return this.enumerateSpectra()
+  async *[Symbol.asyncIterator]() {
+    for await (let value of this.enumerateSpectra()) {
+      yield value
+    }
   }
 }
