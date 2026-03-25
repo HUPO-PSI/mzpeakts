@@ -68,6 +68,7 @@ async function readArrowBatches(
     mem.buffer,
     ffi.arrayAddrs(),
     ffi.schemaAddr(),
+    true,
   );
   ffi.free();
   return arrowTab.batches;
@@ -94,6 +95,7 @@ async function* streamArrowBatches(
         mem.buffer,
         ffi.arrayAddr(),
         ffi.schemaAddr(),
+        true,
       );
       ffi.free();
 
@@ -151,6 +153,8 @@ function decodeDelta(
       acc.append(last);
     }
     last = null;
+  } else {
+    acc.append(startValue)
   }
   for (let val of values) {
     if (val != null) {
@@ -207,21 +211,32 @@ interface JsStatistics<T> {
 export function findMaskedPairs(
   maskedVector: Arrow.Vector,
 ): [number, number][] {
-  const indices: number[] = [];
+  let nullHere: number[] = [];
+  // const raw = maskedVector.toArray()
   for (let i = 0; i < maskedVector.length; i++) {
-    if (!maskedVector.isValid(i)) indices.push(i);
+    if (maskedVector.get(i) == null) nullHere.push(i);
   }
-  if (indices.length === 0) {
+  if (nullHere.length == 0) {
     return [[0, maskedVector.length]];
   }
-  const parts: number[] = [];
-  if (indices[0] !== 0) parts.push(0);
-  parts.push(...indices);
-  if (indices[indices.length - 1] !== maskedVector.length - 1)
-    parts.push(maskedVector.length - 1);
+  if(nullHere[0] != 0) {
+    nullHere = [0, ...nullHere]
+  }
+  if (nullHere[nullHere.length - 1] !== maskedVector.length - 1) {
+    nullHere.push(maskedVector.length - 1)
+  }
+  if (nullHere.length % 2 != 0) {
+    throw new Error(
+      `Number of pairs must be even, got ${nullHere.length}: ${nullHere}, ${maskedVector}`,
+    );
+  }
   const result: [number, number][] = [];
-  for (let i = 0; i < parts.length; i += 2) {
-    result.push([parts[i], parts[i + 1] + 1]);
+  for (let i = 0; i < nullHere.length; i += 2) {
+    if (isNaN(nullHere[i]) || isNaN(nullHere[i + 1])) {
+      debugger;
+      throw new Error(`Bad pair ${[nullHere[i], nullHere[i + 1]]}, ${nullHere}`);
+    }
+    result.push([nullHere[i], nullHere[i + 1] + 1]);
   }
   return result;
 }
@@ -255,12 +270,14 @@ export function estimateMedianDelta(
   return [med2, deltasBelow];
 }
 
-function interpolateNulls(
+export function interpolateNulls(
   values: Arrow.Vector<Arrow.Float>,
   model: SpacingInterpolationModel,
 ): Arrow.Vector<Arrow.Float> {
   const pairIndices = findMaskedPairs(values);
   const chunks = [];
+  let k = 0
+
   for (let [start, end] of pairIndices) {
     const chunk = values.slice(start, end);
     const n = chunk.length;
@@ -286,12 +303,16 @@ function interpolateNulls(
       chunk.set(0, (chunk.get(1) ?? 0) - dx);
       chunk.set(chunk.length - 1, (chunk.get(chunk.length - 2) ?? 0) + dx);
     }
-    // console.log(start, end, chunkReal)
+    k += chunk.length
     chunks.push(chunk);
+  }
+  if (chunks.map(x => x.length).reduce((a, b) => a + b) != values.length) {
+    throw new Error(
+      `Information was lost, total size of chunks does not match input size: ${chunks.map((x) => x.length).reduce((a, b) => a + b)} != ${values.length}`,
+    );
   }
   // const result = Arrow.vectorFromArray<Arrow.Float>(chunks);
   const result = combineVectors(chunks)
-  // console.log(result)
   return result
 }
 
@@ -596,7 +617,7 @@ export class BaseLayoutReader {
     for (let i = 0; i < idxVec.length; i++) {
       if (idxVec.get(i) === entryIndex) selectedRows.push(i);
     }
-    console.log(`Selecting rows  ${selectedRows}`)
+
     return this.processSelectedRows(entryIndex, rootStruct, selectedRows);
   }
 
@@ -607,7 +628,6 @@ export class BaseLayoutReader {
   ): Promise<Arrow.Table> {
     let rowCountRead = 0n;
     const accumulated: Record<string, Arrow.Vector[]> = {};
-    console.log(`Reading for ${entryIndex}, ${startFrom} - ${endAt}`)
     let nBats = 0;
     let ctr = 0
     for await (const batch of this.batches) {
@@ -627,7 +647,6 @@ export class BaseLayoutReader {
       } else {
         const firstIdxOf = firstNotNull(indexVectorOf(rootStruct));
         if (firstIdxOf != null && firstIdxOf > entryIndex) {
-          console.log(`First index ${firstIdxOf} of batch ${ctr} greater than ${entryIndex}`)
           break
         };
       }
@@ -643,27 +662,63 @@ export class BaseLayoutReader {
 
       const entries = this.processRows(entryIndex, rootStruct);
       nBats += 1;
+
+      const sizes: number[] = []
+
       for (let [k, v] of Object.entries(entries)) {
         if (accumulated[k] == undefined) {
           accumulated[k] = [v];
+          sizes.push(
+            v.length
+          )
         } else {
           accumulated[k].push(v);
+          console.log(k, accumulated[k].map(x => x.length).reduce((last, x) => last + x));
+          sizes.push(
+            accumulated[k].map((x) => x.length).reduce((last, x) => last + x),
+          );
         }
+      }
+      if (!sizes.every(v => v == sizes[0])) {
+        throw new Error(`Not all arrays are the same length: ${sizes} for ${accumulated}`)
       }
       rowCountRead += batchSize;
     }
     const final: Record<string, Arrow.Vector> = {};
     if (nBats == 1) {
       for (let [k, v] of Object.entries(accumulated)) {
-        final[this.arrayIndex.fieldToName.get(k) ?? k] = v[0];
+        const arrayMeta = this.arrayIndex.byFieldName.get(k);
+        final[arrayMeta?.arrayName ?? k] = this.handleTransforms(arrayMeta, entryIndex, v[0]);
       }
     } else {
       for (let [k, v] of Object.entries(accumulated)) {
-        final[this.arrayIndex.fieldToName.get(k) ?? k] = combineVectors(v);
+        const arrayMeta = this.arrayIndex.byFieldName.get(k);
+        final[arrayMeta?.arrayName ?? k] = this.handleTransforms(
+          arrayMeta,
+          entryIndex,
+          combineVectors(v),
+        );
       }
     }
 
     return Arrow.tableFromArrays(final as any);
+  }
+
+  handleTransforms(entry: ArrayIndexEntry|undefined, entryIndex: bigint, array: Arrow.Vector<Arrow.Float>) {
+    if (entry?.transform === NULL_ZERO_CURIE) {
+      return nullToZero(array);
+    } else if (
+      entry?.transform === NULL_INTERPOLATE_CURIE &&
+      this.spacingModels?.has(entryIndex)
+    ) {
+      const filled = interpolateNulls(
+        array,
+        this.spacingModels.get(entryIndex)!,
+      );
+      return filled;
+    } else {
+      return array
+    }
   }
 }
 
@@ -679,22 +734,24 @@ export class PointLayoutReader extends BaseLayoutReader {
       selectedRows,
     );
 
-    for (const entry of this.arrayIndex.entries) {
-      const fieldName = entry.fieldName;
-      if (!(fieldName in base)) continue;
+    // for (const entry of this.arrayIndex.entries) {
+    //   const fieldName = entry.fieldName;
 
-      if (entry.transform === NULL_ZERO_CURIE) {
-        base[fieldName] = nullToZero(base[fieldName]);
-      } else if (
-        entry.transform === NULL_INTERPOLATE_CURIE &&
-        this.spacingModels?.has(entryIndex)
-      ) {
-        base[fieldName] = interpolateNulls(
-          base[fieldName],
-          this.spacingModels.get(entryIndex)!,
-        );
-      }
-    }
+    //   if (entry.transform === NULL_ZERO_CURIE) {
+    //     base[fieldName] = nullToZero(base[fieldName]);
+    //   } else if (
+    //     entry.transform === NULL_INTERPOLATE_CURIE &&
+    //     this.spacingModels?.has(entryIndex)
+    //   ) {
+    //     const filled = interpolateNulls(
+    //       base[fieldName],
+    //       this.spacingModels.get(entryIndex)!,
+    //     );
+    //     console.log(filled.get(0), filled.get(filled.length - 1))
+    //     // debugger;
+    //     base[fieldName] = filled
+    //   }
+    // }
 
     return base;
   }
@@ -805,14 +862,7 @@ export class ChunkLayoutReader extends BaseLayoutReader {
         const secValues = secVec.get(rowIdx);
         if (secValues == null) continue;
 
-        if (entry.transform === NULL_ZERO_CURIE) {
-          for (let _i = 0; _i < secValues.length; _i++) {
-            if (!secValues.isValid(_i)) {
-              secValues.set(_i, 0);
-            }
-          }
-          resultSecondary[name].push(secValues);
-        } else if (entry.transform === NUMPRESS_SLOF_CURIE) {
+        if (entry.transform === NUMPRESS_SLOF_CURIE) {
           throw new Error(
             `Numpress decoding not implemented for secondary axis (transform: ${entry.transform})`,
           );
@@ -821,11 +871,8 @@ export class ChunkLayoutReader extends BaseLayoutReader {
         }
       }
     }
+
     let mainAxisCombined = combineVectors(resultMainAxis);
-    const spacingModel = this.spacingModels?.get(entryIndex);
-    if (spacingModel) {
-      mainAxisCombined = interpolateNulls(mainAxisCombined, spacingModel);
-    }
     const result: ColumnMap = {
       [indexColName]: resultIndex.finish().toVector(),
       [mainAxisName]: mainAxisCombined,
@@ -1123,14 +1170,20 @@ export class DataArraysIter
   async next(): Promise<IteratorResult<[bigint, Arrow.Table | ColumnMap]>> {
     const hasNext = await this.moveNextAsync();
     if (!hasNext) return { done: true, value: undefined as any };
-    const value = this._current;
-    if (value == null) throw new Error("Cannot be null");
+    if (this._current == null) throw new Error("Cannot be null");
+    const [entryIndex, arrays] = this._current;
+
     const final: ColumnMap = {};
-    for (let [k, v] of Object.entries(value[1])) {
-      final[this.layoutReader.arrayIndex.fieldToName.get(k) ?? k] = v;
+    for (let [k, v] of Object.entries(arrays)) {
+      const arrayMeta = this.layoutReader.arrayIndex.byFieldName.get(k);
+      final[arrayMeta?.arrayName ?? k] = this.layoutReader.handleTransforms(
+        arrayMeta,
+        entryIndex,
+        v,
+      );
     }
     const payload: [bigint, Arrow.Table] = [
-      value[0],
+      entryIndex,
       Arrow.tableFromArrays(final as any) as Arrow.Table,
     ];
     return { done: false, value: payload };

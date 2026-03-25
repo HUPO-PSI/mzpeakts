@@ -1,17 +1,20 @@
-import { expect, test } from "vitest";
+import { expect, test, beforeAll } from "vitest";
 import * as fs from "fs"
-import { ZipStorage } from "../src/store"
-import { BlobReader, ZipReader } from "@zip.js/zip.js"
+import { MZPeakReader } from '../src/reader';
+
+
 
 test("test launches", async () => {
     const blob = await fs.openAsBlob("static/small.mzpeak")
+    const reader = await MZPeakReader.fromBlob(blob);
+    expect.assert(reader.length == 48)
+})
 
-    const handle = new BlobReader(blob)
-    if (handle.init) {
-        console.log("Initializing")
-        await handle.init()
-    }
-    console.log(await handle.readUint8Array(0, 30))
-    const reader = new ZipStorage(handle);
 
+test("data facet reader", async () => {
+    const blob = await fs.openAsBlob("static/small.chunked.mzpeak");
+    const reader = await MZPeakReader.fromBlob(blob);
+    const dataReader = await reader.spectrumData();
+    expect.assert(dataReader != null)
+    const response = await dataReader.get(0);
 })
