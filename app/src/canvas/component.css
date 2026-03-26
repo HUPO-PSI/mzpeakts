@@ -1,0 +1,15 @@
+text.envelope-label, text.cursor-label, text.peak-label, text.precursor-label {
+    paint-order: stroke;
+    stroke-width: 1;
+    fill: black;
+    stroke: white;
+    user-select: none;
+}
+
+.tick text, .axis-label {
+    user-select: none;
+}
+
+.spectrum-canvas svg {
+    margin-bottom: 1em;
+}

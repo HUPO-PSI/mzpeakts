@@ -1,5 +1,28 @@
 import { DataArrays } from "./data";
-import { Param } from "./metadata";
+import { Param, ParamColumnSpec } from "./metadata";
+
+export class ParamDescribed {
+  params: Param[];
+  meta?: any
+
+  constructor(params: Param[]) {
+    this.params = params
+  }
+
+  getParamByAccession(accession: string) : Param | undefined {
+    let value = this.params.find(p => p.accession == accession)
+    if (value != undefined) return value
+    else if (this.meta) {
+        for (let [key, val] of Object.entries(this.meta)) {
+            const spec = ParamColumnSpec.fromColumnName(key)
+            if (spec.accession == accession && !spec.isUnitOnly) {
+                return new Param(spec.name, val, spec.accession, spec.unit)
+            }
+        }
+    }
+    return undefined
+  }
+}
 
 export class ScanWindow {
     lowerBound: number
@@ -18,7 +41,7 @@ export class ScanWindow {
     }
 }
 
-export class Scan {
+export class Scan extends ParamDescribed {
   sourceIndex: bigint;
   instrumentConfigurationRef: number;
   params: Param[];
@@ -36,6 +59,7 @@ export class Scan {
     presetScanConfiguration?: number,
     meta?: any,
   ) {
+    super(params)
     this.sourceIndex = sourceIndex;
     this.instrumentConfigurationRef = instrumentConfigurationRef;
     this.params = params;
@@ -121,14 +145,14 @@ export class Precursor {
   }
 }
 
-export class SelectedIon {
+export class SelectedIon extends ParamDescribed {
   sourceIndex: bigint;
   precursorIndex: bigint;
   chargeState: number | null;
   intensity: number | null;
   mz: number | null;
   ionMobility: number | null;
-  parameters: Param[];
+  params: Param[];
   meta: any;
 
   constructor(
@@ -141,13 +165,14 @@ export class SelectedIon {
     parameters?: Param[],
     meta?: any,
   ) {
+    super(parameters ?? []);
     this.sourceIndex = sourceIndex;
     this.precursorIndex = precursorIndex;
     this.chargeState = chargeState ?? null;
     this.mz = mz ?? null;
     this.intensity = intensity ?? null;
     this.ionMobility = ionMobility ?? null;
-    this.parameters = parameters ?? [];
+    this.params = parameters ?? [];
     this.meta = meta;
   }
 
@@ -166,7 +191,12 @@ export class SelectedIon {
   }
 }
 
-export class Spectrum {
+export interface PointLike {
+    mz: number,
+    intensity: number
+}
+
+export class Spectrum extends ParamDescribed {
   id: string;
   index: bigint;
   msLevel: number;
@@ -179,6 +209,7 @@ export class Spectrum {
   selectedIons: SelectedIon[];
   meta: any | null;
   dataArrays?: DataArrays;
+  centroids?: PointLike[];
 
   constructor(
     id: string,
@@ -194,6 +225,7 @@ export class Spectrum {
     meta?: any | null,
     dataArrays?: DataArrays,
   ) {
+    super(params)
     this.id = id;
     this.index = index;
     this.msLevel = msLevel;
@@ -206,6 +238,28 @@ export class Spectrum {
     this.selectedIons = selectedIons ?? [];
     this.meta = meta ?? null;
     this.dataArrays = dataArrays;
+  }
+
+  get rawArrays() {
+    return this.dataArrays;
+  }
+
+  centroidPeaks() {
+    if (this.centroids) return this.centroids;
+    if (!this.isProfile) {
+      if (this.dataArrays) {
+        const intensityArr = this.dataArrays["intensity array"] as Float32Array;
+        const mzArr = this.dataArrays["m/z array"] as Float64Array;
+        this.centroids = [];
+        for (let i = 0; i < mzArr.length; i++) {
+          this.centroids.push({
+            mz: mzArr[i],
+            intensity: intensityArr[i],
+          });
+        }
+        return this.centroids;
+      }
+    }
   }
 
   static fromRecord(record: any) {
@@ -224,5 +278,4 @@ export class Spectrum {
       record.dataArrays,
     );
   }
-
 }

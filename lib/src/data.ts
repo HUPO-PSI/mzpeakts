@@ -80,7 +80,7 @@ async function* streamArrowBatches(
   columns?: string[],
   options_?: ReaderOptions,
 ) {
-  const options = options_ ?? {batchSize: 2048};
+  const options = options_ ?? { batchSize: 2048 };
   options.rowGroups = rowGroups;
   if (columns) options.columns = columns;
   const tabStream = (await handle.stream(options)).values();
@@ -154,7 +154,7 @@ function decodeDelta(
     }
     last = null;
   } else {
-    acc.append(startValue)
+    acc.append(startValue);
   }
   for (let val of values) {
     if (val != null) {
@@ -219,11 +219,11 @@ export function findMaskedPairs(
   if (nullHere.length == 0) {
     return [[0, maskedVector.length]];
   }
-  if(nullHere[0] != 0) {
-    nullHere = [0, ...nullHere]
+  if (nullHere[0] != 0) {
+    nullHere = [0, ...nullHere];
   }
   if (nullHere[nullHere.length - 1] !== maskedVector.length - 1) {
-    nullHere.push(maskedVector.length - 1)
+    nullHere.push(maskedVector.length - 1);
   }
   if (nullHere.length % 2 != 0) {
     throw new Error(
@@ -234,7 +234,9 @@ export function findMaskedPairs(
   for (let i = 0; i < nullHere.length; i += 2) {
     if (isNaN(nullHere[i]) || isNaN(nullHere[i + 1])) {
       debugger;
-      throw new Error(`Bad pair ${[nullHere[i], nullHere[i + 1]]}, ${nullHere}`);
+      throw new Error(
+        `Bad pair ${[nullHere[i], nullHere[i + 1]]}, ${nullHere}`,
+      );
     }
     result.push([nullHere[i], nullHere[i + 1] + 1]);
   }
@@ -276,7 +278,7 @@ export function interpolateNulls(
 ): Arrow.Vector<Arrow.Float> {
   const pairIndices = findMaskedPairs(values);
   const chunks = [];
-  let k = 0
+  let k = 0;
 
   for (let [start, end] of pairIndices) {
     const chunk = values.slice(start, end);
@@ -299,21 +301,27 @@ export function interpolateNulls(
         throw new Error(`Chunk ${start}-${end} is too short to interpolate!?`);
       }
     } else {
-      const [dx, _] = estimateMedianDelta(chunk.toArray());
+      const [dx, _] = estimateMedianDelta(
+        chunk
+          .slice(
+            chunk.isValid(0) ? 0 : 1,
+            chunk.isValid(chunk.length - 1) ? chunk.length : chunk.length - 1,
+          )
+          .toArray(),
+      );
       chunk.set(0, (chunk.get(1) ?? 0) - dx);
       chunk.set(chunk.length - 1, (chunk.get(chunk.length - 2) ?? 0) + dx);
     }
-    k += chunk.length
+    k += chunk.length;
     chunks.push(chunk);
   }
-  if (chunks.map(x => x.length).reduce((a, b) => a + b) != values.length) {
+  if (chunks.map((x) => x.length).reduce((a, b) => a + b) != values.length) {
     throw new Error(
       `Information was lost, total size of chunks does not match input size: ${chunks.map((x) => x.length).reduce((a, b) => a + b)} != ${values.length}`,
     );
   }
-  // const result = Arrow.vectorFromArray<Arrow.Float>(chunks);
-  const result = combineVectors(chunks)
-  return result
+  const result = combineVectors(chunks);
+  return result;
 }
 
 // ---- GroupTagBounds ----
@@ -629,9 +637,9 @@ export class BaseLayoutReader {
     let rowCountRead = 0n;
     const accumulated: Record<string, Arrow.Vector[]> = {};
     let nBats = 0;
-    let ctr = 0
+    let ctr = 0;
     for await (const batch of this.batches) {
-      ctr += 1
+      ctr += 1;
       const rootStruct = rootStructOf(batch);
       if (rootStruct == null) {
         rowCountRead += BigInt(batch.numRows);
@@ -647,8 +655,8 @@ export class BaseLayoutReader {
       } else {
         const firstIdxOf = firstNotNull(indexVectorOf(rootStruct));
         if (firstIdxOf != null && firstIdxOf > entryIndex) {
-          break
-        };
+          break;
+        }
       }
 
       if (endAt != null) {
@@ -663,14 +671,12 @@ export class BaseLayoutReader {
       const entries = this.processRows(entryIndex, rootStruct);
       nBats += 1;
 
-      const sizes: number[] = []
+      const sizes: number[] = [];
 
       for (let [k, v] of Object.entries(entries)) {
         if (accumulated[k] == undefined) {
           accumulated[k] = [v];
-          sizes.push(
-            v.length
-          )
+          sizes.push(v.length);
         } else {
           accumulated[k].push(v);
           sizes.push(
@@ -678,8 +684,10 @@ export class BaseLayoutReader {
           );
         }
       }
-      if (!sizes.every(v => v == sizes[0])) {
-        throw new Error(`Not all arrays are the same length: ${sizes} for ${accumulated}`)
+      if (!sizes.every((v) => v == sizes[0])) {
+        throw new Error(
+          `Not all arrays are the same length: ${sizes} for ${accumulated}`,
+        );
       }
       rowCountRead += batchSize;
     }
@@ -687,7 +695,11 @@ export class BaseLayoutReader {
     if (nBats == 1) {
       for (let [k, v] of Object.entries(accumulated)) {
         const arrayMeta = this.arrayIndex.byFieldName.get(k);
-        final[arrayMeta?.arrayName ?? k] = this.handleTransforms(arrayMeta, entryIndex, v[0]);
+        final[arrayMeta?.arrayName ?? k] = this.handleTransforms(
+          arrayMeta,
+          entryIndex,
+          v[0],
+        );
       }
     } else {
       for (let [k, v] of Object.entries(accumulated)) {
@@ -703,7 +715,11 @@ export class BaseLayoutReader {
     return Arrow.tableFromArrays(final as any);
   }
 
-  handleTransforms(entry: ArrayIndexEntry|undefined, entryIndex: bigint, array: Arrow.Vector<Arrow.Float>) {
+  handleTransforms(
+    entry: ArrayIndexEntry | undefined,
+    entryIndex: bigint,
+    array: Arrow.Vector<Arrow.Float>,
+  ) {
     if (entry?.transform === NULL_ZERO_CURIE) {
       return nullToZero(array);
     } else if (
@@ -716,7 +732,7 @@ export class BaseLayoutReader {
       );
       return filled;
     } else {
-      return array
+      return array;
     }
   }
 }
@@ -954,6 +970,7 @@ export class DataArraysReader {
         {
           offset: bigIntToNumber(rowSpan.start - offset) - 1,
           limit: bigIntToNumber(rowSpan.end - rowSpan.start) + 1,
+          batchSize: 32768,
         },
       );
       const layoutReader = this.makeLayoutReader(batches);
@@ -965,14 +982,22 @@ export class DataArraysReader {
         this.handle,
         rowGroups.map(Number),
         undefined,
+        {
+          batchSize: 32768,
+        },
       );
       const layoutReader = this.makeLayoutReader(batches);
       return layoutReader.readRowsOf(key, null, null);
     }
   }
 
-  enumerate(): DataArraysIter {
-    return new DataArraysIter(this, streamArrowBatches(this.handle));
+  enumerate(): DataStreamIterator {
+    return new DataStreamIterator(
+      this,
+      streamArrowBatches(this.handle, undefined, undefined, {
+        batchSize: 32768,
+      }),
+    );
   }
 
   [Symbol.asyncIterator](): AsyncIterator<[bigint, Arrow.Table | ColumnMap]> {
@@ -1001,9 +1026,7 @@ function vectorWhere(mask: boolean[]) {
   return indices;
 }
 
-// ---- DataArraysIter ----
-
-export class DataArraysIter
+export class DataStreamIterator
   implements
     AsyncIterator<[bigint, Arrow.Table | ColumnMap]>,
     AsyncIterable<[bigint, Arrow.Table | ColumnMap]>

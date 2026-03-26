@@ -1,0 +1,14 @@
+#root {
+  /* margin-left: 25%; */
+  margin: 0 18%;
+  text-align: center;
+  width: 100%;
+}
+
+.card {
+  padding: 2em;
+}
+
+#application-header {
+  text-align: start;
+}

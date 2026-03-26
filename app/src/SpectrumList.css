@@ -1,0 +1,11 @@
+tbody  :hover {
+    background-color: rgb(133, 239, 243);
+}
+
+td.current-spectrum {
+    background-color: rgb(76, 252, 170);
+}
+
+td.native-id-column {
+    font-size: 0.8em;
+}
