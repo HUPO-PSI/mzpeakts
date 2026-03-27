@@ -24,6 +24,26 @@ export function packTableIntoDataArrays(table: Arrow.Table): DataArrays {
   return dataArrays;
 }
 
+export function packTableIntoPeaks(table: Arrow.Table) {
+  const dataArrays = packTableIntoDataArrays(table)
+  const peaks = []
+  let i = 0
+  for(let [k, vs] of Object.entries(dataArrays)) {
+    const key = k.split(" ").slice(0, -1).join("_").replace("/", "");
+    if (i == 0) {
+      for(let v of vs) {
+        peaks.push({[key]: v})
+      }
+      i += 1;
+    } else {
+      for(let j = 0; j < vs.length; j++) {
+        peaks[j][key] = vs[j]
+      }
+    }
+  }
+  return peaks
+}
+
 export class SpacingInterpolationModel {
   coefficients: number[];
 

@@ -1,8 +1,9 @@
 import { ZipStorage } from "./store"
 import { SpectrumMetadata, ChromatogramMetadata, FileMetadata } from './metadata';
 import { HttpRangeReader, BlobReader } from "@zip.js/zip.js";
-import { DataArraysReader, packTableIntoDataArrays } from "./data";
+import { DataArraysReader, packTableIntoDataArrays, packTableIntoPeaks } from "./data";
 import { BufferContext } from "./array_index";
+import { PointLike } from "./record";
 
 
 export class MZPeakReader<T> {
@@ -146,6 +147,13 @@ export class MZPeakReader<T> {
       const data = await handle?.get(index);
       if (data) {
         meta["dataArrays"] = packTableIntoDataArrays(data);
+      }
+      const peakHandle = await this.spectrumPeaks();
+      const peakData = await peakHandle?.get(index);
+      if (peakData && peakData.numRows > 0) {
+        const peaks = packTableIntoPeaks(peakData) as any as PointLike[];
+        console.log(peaks)
+        meta.centroids = peaks
       }
       return meta;
     }

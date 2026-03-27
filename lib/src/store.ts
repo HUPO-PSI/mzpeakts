@@ -79,6 +79,18 @@ export class ZipStorage<T> {
     return RemoteBlob.fromEntry(this.reader, entry);
   }
 
+  static async fromUrl(url: string | URL) {
+    const store = new ZipStorage(new zip.HttpRangeReader(url))
+    await store.init();
+    return store
+  }
+
+  static async fromBlob(blob: Blob) {
+    const store = new ZipStorage(new zip.BlobReader(blob))
+    await store.init();
+    return store;
+  }
+
   async openFromIndex(
     entityType: EntityType,
     dataKind: DataKind,
@@ -202,6 +214,8 @@ export class RemoteBlob<T> {
     blob.end += headerSize;
     return blob;
   }
+
+
 
   constructor(
     source: zip.Reader<T>,
