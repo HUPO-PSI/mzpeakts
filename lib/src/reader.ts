@@ -152,7 +152,6 @@ export class MZPeakReader<T> {
       const peakData = await peakHandle?.get(index);
       if (peakData && peakData.numRows > 0) {
         const peaks = packTableIntoPeaks(peakData) as any as PointLike[];
-        console.log(peaks)
         meta.centroids = peaks
       }
       return meta;

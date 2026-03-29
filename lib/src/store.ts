@@ -22,7 +22,7 @@ export class FileIndexEntry {
   data_kind: DataKind;
   entity_type: EntityType;
 
-  static FILE_NAME: string = "mzpeak_index.json";
+
 
   constructor(name: string, data_kind: DataKind, entity_type: EntityType) {
     this.name = name;
@@ -44,14 +44,18 @@ export class FileIndex {
   metadata: any;
   files: FileIndexEntry[];
 
-  constructor(files: FileIndexEntry[], metadata: any | undefined=undefined) {
+  static FILE_NAME: string = "mzpeak_index.json";
+
+  constructor(files: FileIndexEntry[], metadata: any | undefined = undefined) {
     this.files = files;
-    this.metadata = metadata ? metadata : {}
+    this.metadata = metadata ? metadata : {};
   }
 
   static fromRaw(indexObj: any) {
-    const files = Array.from(indexObj.files).map((e: any) => new FileIndexEntry(e.name, e.data_kind, e.entity_type))
-    return new FileIndex(files, indexObj.metadata)
+    const files = Array.from(indexObj.files).map(
+      (e: any) => new FileIndexEntry(e.name, e.data_kind, e.entity_type),
+    );
+    return new FileIndex(files, indexObj.metadata);
   }
 }
 
@@ -170,14 +174,17 @@ export class ZipStorage<T> {
     const it = this.archive.getEntriesGenerator();
     for await (let entry of it) {
       this.entries.push(entry);
-      if (entry.filename == FileIndexEntry.FILE_NAME) {
+      if (entry.filename == FileIndex.FILE_NAME) {
         const rawIndex = JSON.parse(
           await (await RemoteBlob.fromEntry(this.reader, entry)).text(),
         );
         this.fileIndex = FileIndex.fromRaw(rawIndex);
+        this.initialized = true;
       }
     }
-    this.initialized = true;
+    if (!this.initialized) {
+      throw new Error(`File index did not contain "${FileIndex.FILE_NAME}", not a valid mzPeak ZIP!`)
+    }
   }
 }
 

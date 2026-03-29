@@ -4,7 +4,7 @@ import './App.css'
 import { DataFileChooser } from "./DataFileChooser";
 import { MZPeakReader } from "mzpeakts";
 import { SpectrumList } from './SpectrumList';
-import { SpectrumCanvasComponent2 } from "./canvas/component"
+import { SpectrumCanvasComponent } from "./canvas/component"
 import {
     SpectrumViewerProvider,
     useSpectrumViewer,
@@ -12,13 +12,10 @@ import {
     ViewerActionType,
 } from "./util";
 
-import useMediaQuery from "@mui/material/useMediaQuery";
 import AppBar from "@mui/material/AppBar";
 import Toolbar from "@mui/material/Toolbar";
 import Typography from "@mui/material/Typography";
 import { createTheme, styled } from '@mui/material/styles';
-import Drawer from "@mui/material/Drawer";
-import Divider from "@mui/material/Divider";
 import InstructionsDialog from "./Instructions"
 import { ThemeProvider } from '@emotion/react';
 
@@ -75,6 +72,7 @@ export function Header({ children }: HeaderProps) {
 
 export function Frame() {
   const [dataFile, setDataFile] = useState<File | null>(null);
+  const [dataUrl, setDataUrl] = useState<string | null>(null);
   const viewStateDispatch = useSpectrumViewerDispatch();
   const viewState = useSpectrumViewer();
 
@@ -97,15 +95,23 @@ export function Frame() {
     }
   }, [dataFile]);
 
+  useEffect(() => {
+    if (dataUrl) {
+      MZPeakReader.fromUrl(dataUrl).then((value) => {
+        viewStateDispatch({ type: ViewerActionType.MZReader, value });
+      });
+    }
+  }, [dataUrl]);
+
   return (
     <>
       <Header>
         <InstructionsDialog />
-        <DataFileChooser dataFile={dataFile} setDataFile={setDataFile} />
+        <DataFileChooser dataFile={dataFile} setDataFile={setDataFile} setDataUrl={setDataUrl} />
       </Header>
 
       <div>
-        <SpectrumCanvasComponent2 />
+        <SpectrumCanvasComponent />
       </div>
 
       <div>{viewState.mzReader ? <SpectrumList /> : <div></div>}</div>

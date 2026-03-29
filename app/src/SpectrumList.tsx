@@ -1,5 +1,5 @@
-import { forwardRef, Fragment, useState } from "react";
-import { MZPeakReader, Param, Spectrum } from "mzpeakts";
+import { forwardRef, Fragment, } from "react";
+import { MZPeakReader, Spectrum, SpectrumMetadata } from "mzpeakts";
 import "./SpectrumList.css";
 
 import {
@@ -18,6 +18,7 @@ import {
   useSpectrumViewer,
   ViewerActionType,
 } from "./util";
+import React from "react";
 
 export interface RowContext {
   clickHandler: Function;
@@ -92,23 +93,23 @@ export const columnDefs: Column[] = [
     getter: (spectrum: Spectrum) => spectrum.time,
     eager: true,
   },
-  {
-    name: "Base Peak m/z",
-    numeric: true,
-    format: (x: number) => x.toFixed(2),
-    getter: (spectrum: Spectrum) => {
-      return spectrum.getParamByAccession("MS:1000504")?.value;
-    },
-    eager: false,
-  },
-  {
-    name: "Base Peak Int.",
-    numeric: true,
-    format: (x: number) => x.toExponential(2),
-    getter: (spectrum: Spectrum) =>
-      spectrum.getParamByAccession("MS:1000505")?.value,
-    eager: false,
-  },
+  // {
+  //   name: "Base Peak m/z",
+  //   numeric: true,
+  //   format: (x: number) => x.toFixed(2),
+  //   getter: (spectrum: Spectrum) => {
+  //     return spectrum.getParamByAccession("MS:1000504")?.value;
+  //   },
+  //   eager: false,
+  // },
+  // {
+  //   name: "Base Peak Int.",
+  //   numeric: true,
+  //   format: (x: number) => x.toExponential(2),
+  //   getter: (spectrum: Spectrum) =>
+  //     spectrum.getParamByAccession("MS:1000505")?.value,
+  //   eager: false,
+  // },
   {
     name: "MS Level",
     numeric: true,
@@ -126,7 +127,6 @@ export const columnDefs: Column[] = [
   },
   {
     name: "Prec. z",
-    width: 40,
     numeric: true,
     getter: (spectrum: Spectrum) =>
       spectrum.selectedIons.length
@@ -147,6 +147,7 @@ export function fixedHeaderContent() {
         return (
           <TableCell
             key={column.name}
+            padding="none"
             variant="head"
             align={"center"}
             style={style}
@@ -160,41 +161,69 @@ export function fixedHeaderContent() {
   );
 }
 
-export function rowContent(
-  _index: number,
-  row: Spectrum,
+export function rowContentBasic(
+  index: number,
+  handle: SpectrumMetadata,
   currentSpectrumID: string | undefined,
-  isScrolling: boolean = false,
 ) {
+  const row = handle.get(index)
   const isCurrentSpectrum = row.id == currentSpectrumID;
+  const selIon = row.selectedIons.length ? row.selectedIons[0] : null;
+  const style: React.CSSProperties = { padding: "3px", textAlign: "center" };
+  const className = isCurrentSpectrum ? "current-spectrum" : "";
   return (
-    <Fragment>
-      {columnDefs.map((column) => {
-        let value = isScrolling && !column.eager ? null : column.getter(row);
-        if (column.format && value !== undefined && value !== null) {
-          value = column.format(value);
+    <Fragment key={index}>
+      <TableCell key="index" className={className}>
+        {row.index.toString()}
+      </TableCell>
+      <TableCell
+        key="id"
+        className={
+          isCurrentSpectrum
+            ? "native-id-column current-spectrum"
+            : "native-id-column"
         }
-        return (
-          <TableCell
-            key={column.name}
-            align={"center"}
-            className={[
-              isCurrentSpectrum ? "current-spectrum" : "",
-              column.class ? column.class : "",
-            ].join(" ")}
-          >
-            {value}
-          </TableCell>
-        );
-      })}
+        style={{ width: 350 }}
+      >
+        {row.id}
+      </TableCell>
+      <TableCell key="time" style={style} className={className}>
+        {row.time}
+      </TableCell>
+      <TableCell key="ms-level" style={style} className={className}>
+        {row.msLevel}
+      </TableCell>
+      <TableCell key="precursor-mz" style={style} className={className}>
+        {selIon?.mz?.toFixed(3)}
+      </TableCell>
+      <TableCell key="precursor-z" style={style} className={className}>
+        {selIon?.chargeState ?? ""}
+      </TableCell>
     </Fragment>
   );
 }
 
+
+export function rowContentBasicProp(props: {
+  index: number,
+  handle: SpectrumMetadata,
+  currentSpectrumID: string | undefined,
+}) {
+  return rowContentBasic(props.index, props.handle, props.currentSpectrumID)
+}
+
+
+export const RowContentMemo = React.memo(
+  rowContentBasicProp,
+  (prevProps, nextProps) => {
+    return prevProps.index == nextProps.index && prevProps.currentSpectrumID == nextProps.currentSpectrumID;
+  },
+);
+
+
 export function VirtualizedTable() {
   const viewerDispatch = useSpectrumViewerDispatch();
   const viewerState = useSpectrumViewer();
-  const [isScrolling, setIsScrolling] = useState(false);
   const mzReader = viewerState.mzReader;
   const onClick = async (index: number) => {
     if (mzReader) {
@@ -207,14 +236,12 @@ export function VirtualizedTable() {
     }
   };
 
-
-
   const isMobile = useMediaQuery("(max-width:500px)");
 
   return (
     <Paper
       style={{
-        height: 400,
+        height: 300,
         minWidth: 1000,
         overflowY: "hidden",
         overflowX: "hidden",
@@ -223,24 +250,24 @@ export function VirtualizedTable() {
     >
       <TableVirtuoso
         totalCount={mzReader ? mzReader.length : 0}
-        isScrolling={setIsScrolling}
         itemContent={(index: number) => {
-          // mzReader?.setDataLoading(false);
           const reader = mzReader as MZPeakReader<any>;
           const metaReader = reader.spectrumMetadata;
           if (metaReader == null)
             throw new Error("Cannot handle missing spectra");
 
-          return rowContent(
-            index,
-            metaReader.get(index),
-            viewerState.currentSpectrumID,
-            isScrolling,
+          return (
+            <RowContentMemo
+              index={index}
+              handle={metaReader}
+              currentSpectrumID={viewerState.currentSpectrumID}
+            />
           );
         }}
         context={{ clickHandler: onClick }}
         components={VirtuosoTableComponents}
         fixedHeaderContent={fixedHeaderContent}
+        style={{"overflow": "scroll"}}
       />
     </Paper>
   );

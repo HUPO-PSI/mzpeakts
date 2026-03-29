@@ -126,8 +126,8 @@ export class MSCanvasBase<T extends PointLike> {
   ) {
     this.containerSelector = containerSelector;
     this.spectrumID = id;
-    this.width = width || defaultWidth;
-    this.height = height || defaultHeight;
+    this.width = width ?? defaultWidth;
+    this.height = height ?? defaultHeight;
     this.margins = margins;
     this.scanRange = scanRange || { lowerBound: 80.0, upperBound: 2000.0 };
 

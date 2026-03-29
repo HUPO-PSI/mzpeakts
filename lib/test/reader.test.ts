@@ -81,6 +81,9 @@ test("chunked layout reader", async () => {
         }
       }),
     );
+    if (response.isProfile) {
+      expect.assert(response.centroidPeaks()?.length ?? 0 > 0)
+    }
   }
 });
 
@@ -98,19 +101,9 @@ test("point layout reader", async () => {
     const mzArray = response.dataArrays["m/z array"] as Float64Array;
     expect.assert(mzArray.length == size);
     expect.assert(mzArray.every((v) => v > 0.0));
-    console.log(index)
     for(let i = 1; i < mzArray.length; i++) {
         expect.assert(mzArray[i] >= mzArray[i - 1], `Expected ${i} > ${i - 1}: ${mzArray[i]} < ${mzArray[i - 1]}`);
     }
-    // expect.assert(
-    //   mzArray.every((v, i, arr) => {
-    //     if (i == 0) {
-    //       return true;
-    //     } else {
-    //       return v >= arr[i - 1];
-    //     }
-    //   }),
-    // );
   }
 });
 

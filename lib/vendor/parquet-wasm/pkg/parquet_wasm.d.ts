@@ -1,10 +1,6 @@
 /* tslint:disable */
 /* eslint-disable */
 /**
- * Call this function at least once during initialization to get better error
- */
-export function setPanicHook(): void;
-/**
  * Read a Parquet file into Arrow data.
  *
  * This returns an Arrow table in WebAssembly memory. To transfer the Arrow table to JavaScript
@@ -282,6 +278,10 @@ export function readParquetStream(url: string, content_length?: number | null): 
  * @returns ReadableStream containing serialized Parquet data.
  */
 export function transformParquetStream(stream: ReadableStream, writer_properties?: WriterProperties | null): Promise<ReadableStream>;
+/**
+ * Call this function at least once during initialization to get better error
+ */
+export function setPanicHook(): void;
 /**
  * Returns a handle to this wasm instance's `WebAssembly.Memory`
  */
@@ -787,6 +787,10 @@ export class ParquetMetaData {
    * Returns row group metadata for all row groups
    */
   rowGroups(): RowGroupMetaData[];
+  /**
+   * Returns the column index for this column from this file if loaded
+   */
+  columnIndexFor(column: number): any[];
 }
 /**
  * A group of columns of equal length in WebAssembly memory with an associated {@linkcode Schema}.

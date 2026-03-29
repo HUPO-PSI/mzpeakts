@@ -1,14 +1,137 @@
-import { ChangeEvent } from "react";
+import { ChangeEvent, useState, useRef } from "react";
 
 import Button from "@mui/material/Button";
+import Dialog from "@mui/material/Dialog";
+import DialogActions from "@mui/material/DialogActions";
+import DialogContent from "@mui/material/DialogContent";
+import DialogTitle from "@mui/material/DialogTitle";
+import TextField from "@mui/material/TextField";
+import CircularProgress from "@mui/material/CircularProgress";
+import InputAdornment from "@mui/material/InputAdornment";
 import { styled } from "@mui/material/styles";
 import FileOpenIcon from "@mui/icons-material/FileOpen";
-import { Box, TextField } from "@mui/material";
-import { defaultWidth } from "./canvas/canvas";
+import LinkIcon from "@mui/icons-material/Link";
+import CheckCircleOutlineIcon from "@mui/icons-material/CheckCircleOutline";
+import ErrorOutlineIcon from "@mui/icons-material/ErrorOutline";
+import { store } from "mzpeakts";
 
-interface DataFileChooserProps {
-  dataFile: File | null;
-  setDataFile: Function;
+type UrlValidationState =
+  | { status: "idle" }
+  | { status: "loading" }
+  | { status: "valid" }
+  | { status: "error"; message: string };
+
+interface RemoteUrlModalProps {
+  onLoad: (url: string) => void;
+}
+
+function RemoteUrlModal({ onLoad }: RemoteUrlModalProps) {
+  const [open, setOpen] = useState(false);
+  const [urlInput, setUrlInput] = useState("");
+  const [validation, setValidation] = useState<UrlValidationState>({ status: "idle" });
+  const debounceTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const validationGeneration = useRef(0);
+
+  const handleClose = () => {
+    if (debounceTimer.current) clearTimeout(debounceTimer.current);
+    validationGeneration.current++;
+    setOpen(false);
+    setUrlInput("");
+    setValidation({ status: "idle" });
+  };
+
+  const validateUrl = async (url: string) => {
+    const generation = ++validationGeneration.current;
+    try {
+      await store.ZipStorage.fromUrl(url);
+      if (generation === validationGeneration.current) {
+        setValidation({ status: "valid" });
+      }
+    } catch (err: any) {
+      if (generation === validationGeneration.current) {
+        setValidation({
+          status: "error",
+          message: err?.message ?? "Invalid or unreachable URL",
+        });
+      }
+    }
+  };
+
+  const handleUrlChange = (e: ChangeEvent<HTMLInputElement>) => {
+    const value = e.currentTarget.value;
+    setUrlInput(value);
+    if (debounceTimer.current) clearTimeout(debounceTimer.current);
+    if (!value) {
+      setValidation({ status: "idle" });
+      return;
+    }
+    setValidation({ status: "loading" });
+    debounceTimer.current = setTimeout(() => validateUrl(value), 500);
+  };
+
+  const handleLoad = () => {
+    onLoad(urlInput);
+    handleClose();
+  };
+
+  const endAdornment = (() => {
+    if (validation.status === "loading") return <CircularProgress size={20} />;
+    if (validation.status === "valid") return <CheckCircleOutlineIcon color="success" />;
+    if (validation.status === "error") return <ErrorOutlineIcon color="error" />;
+    return null;
+  })();
+
+  const helperText = (() => {
+    if (validation.status === "error") return validation.message;
+    if (validation.status === "valid") return "URL is valid";
+    return "\u00a0";
+  })();
+
+  return (
+    <>
+      <Button
+        variant="contained"
+        startIcon={<LinkIcon />}
+        onClick={() => setOpen(true)}
+        style={{ marginRight: "1em" }}
+      >
+        Remote URL
+      </Button>
+      <Dialog open={open} onClose={handleClose} fullWidth maxWidth="sm">
+        <DialogTitle>Load Remote File</DialogTitle>
+        <DialogContent>
+          <TextField
+            autoFocus
+            fullWidth
+            label="File URL"
+            placeholder="https://example.com/file.mzpeak"
+            value={urlInput}
+            onChange={handleUrlChange}
+            error={validation.status === "error"}
+            helperText={helperText}
+            margin="normal"
+            slotProps={{
+              input: {
+                endAdornment: endAdornment ? (
+                  <InputAdornment position="end">{endAdornment}</InputAdornment>
+                ) : null,
+              },
+            }}
+          />
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={handleClose}>Cancel</Button>
+          <Button
+            variant="contained"
+            onClick={handleLoad}
+            disabled={validation.status !== "valid"}
+          >
+            Load
+          </Button>
+        </DialogActions>
+      </Dialog>
+    </>
+  );
 }
 
 const VisuallyHiddenInput = styled("input")({
@@ -23,9 +146,16 @@ const VisuallyHiddenInput = styled("input")({
   width: 1,
 });
 
+interface DataFileChooserProps {
+  dataFile: File | null;
+  setDataFile: Function;
+  setDataUrl?: (url: string) => void;
+}
+
 export function DataFileChooser({
   dataFile,
   setDataFile,
+  setDataUrl,
 }: DataFileChooserProps) {
   const onChangeHandler = (e: ChangeEvent<HTMLInputElement>) => {
     const target = e.currentTarget;
@@ -38,26 +168,9 @@ export function DataFileChooser({
   };
   return (
     <>
-      {/* <Box
-        width={"50%"}
-        style={{
-          backgroundColor: "whitesmoke",
-          padding: "5px",
-          borderRadius: "3px",
-          marginRight: "1em"
-        }}
-      >
-        <TextField
-          variant="standard"
-          inputMode="url"
-          label="Remote URL"
-          color="primary"
-          fullWidth
-        />
-      </Box> */}
+      {setDataUrl && <RemoteUrlModal onLoad={setDataUrl} />}
       <Button
         component="label"
-        role={undefined}
         variant="contained"
         tabIndex={-1}
         startIcon={<FileOpenIcon />}

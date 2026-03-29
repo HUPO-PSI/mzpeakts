@@ -11,7 +11,7 @@ import {
   bufferContextName,
 } from "./array_index";
 import { FloatArray, IntArray } from "apache-arrow/type";
-import { bigIntToNumber } from "apache-arrow/util/bigint";
+import { bigIntToNumber } from 'apache-arrow/util/bigint';
 
 export type DataArrays = Record<string, FloatArray | IntArray | string[]>;
 
@@ -215,6 +215,13 @@ interface JsStatistics<T> {
   is_min_value_exact: boolean;
 }
 
+interface JsDataPage<T> {
+  min: T | undefined
+  max: T | undefined
+  start_row: number | undefined
+  null_count: number | undefined
+}
+
 /**
  * Construct index ranges between pairs of masked values in `maskedVector`.
  *
@@ -407,27 +414,24 @@ export class DataArraysReaderMeta {
   context: BufferContext;
   arrayIndex: ArrayIndex;
   rowGroupIndex: RangeIndex;
-  entrySpanIndex: RangeIndex;
+  pageKeyIndex: JsDataPage<bigint>[] | null;
   format: BufferFormat;
   spacingModels: Map<bigint, SpacingInterpolationModel> | null;
-  spanIndexReady: boolean;
 
   constructor(
     context: BufferContext,
     arrayIndex: ArrayIndex,
     rowGroupIndex: RangeIndex,
-    entrySpanIndex: RangeIndex,
     format: BufferFormat,
     spacingModels: Map<bigint, SpacingInterpolationModel> | null = null,
-    spanIndexReady: boolean = false,
+    pageKeyIndex: JsDataPage<bigint>[] | null = null,
   ) {
     this.context = context;
     this.arrayIndex = arrayIndex;
     this.rowGroupIndex = rowGroupIndex;
-    this.entrySpanIndex = entrySpanIndex;
     this.format = format;
     this.spacingModels = spacingModels;
-    this.spanIndexReady = spanIndexReady;
+    this.pageKeyIndex = pageKeyIndex;
   }
 
   static async fromParquet(
@@ -472,6 +476,23 @@ export class DataArraysReaderMeta {
       }
     }
 
+    let pages = (pqMeta.columnIndexFor(0) as JsDataPage<number>[]).map(
+      (page) => {
+        return {
+          min:
+            page.min == null || page.min == undefined
+              ? undefined
+              : BigInt(page.min),
+          max:
+            page.max == null || page.max == undefined
+              ? undefined
+              : BigInt(page.max),
+          start_row: page.start_row,
+          null_count: page.null_count,
+        };
+      },
+    ) as JsDataPage<bigint>[];
+
     const rowGroupBounds: GroupTagBounds[] = [];
     for (let i = 0; i < pqMeta.numRowGroups(); i++) {
       let rg = pqMeta.rowGroup(i);
@@ -495,77 +516,27 @@ export class DataArraysReaderMeta {
       context,
       arrayIndex,
       new RangeIndex(rowGroupBounds),
-      new RangeIndex(rowSpanBounds),
       format,
       null,
-      false,
+      pages,
     );
   }
 
-  async buildSpanIndex(handle: ParquetFile) {
-    // Build RangeIndex and EntrySpanIndex by scanning index column per row group.
-    // This can be time intensive, so let's put this task on the backburner and use the slower
-    // row group-level scanning while we are waiting
-    const idxColName = bufferContextIndexName(this.context);
-    this.entrySpanIndex.ranges = [];
-
-    const pqMeta = handle.metadata();
-    const nRowGroups = pqMeta.numRowGroups();
-    if (nRowGroups === 0) throw new Error("Empty Parquet file");
-
-    let offset = 0n;
-    let lastIdx = 0n;
-    let spanStart = 0n;
-    let seenFirst = false;
-    for (let i = 0; i < nRowGroups; i++) {
-      const batches = await readArrowBatches(
-        handle,
-        [i],
-        [`${this.arrayIndex.prefix}.${idxColName}`],
-      );
-      let rgMin: bigint | null = null;
-      let rgMax: bigint | null = null;
-
-      for (const batch of batches) {
-        const rootStruct = rootStructOf(batch);
-        if (rootStruct == null) {
-          offset += BigInt(batch.numRows);
-          continue;
-        }
-        const indexVec = rootStruct.getChild(
-          idxColName,
-        ) as Arrow.Vector<Arrow.Uint64> | null;
-        if (indexVec == null) {
-          offset += BigInt(rootStruct.length);
-          continue;
-        }
-
-        for (let r = 0; r < indexVec.length; r++) {
-          const srcIdx = indexVec.get(r);
-          offset += 1n;
-          if (srcIdx == null) continue;
-          if (rgMin == null || srcIdx < rgMin) rgMin = srcIdx;
-          if (rgMax == null || srcIdx > rgMax) rgMax = srcIdx;
-          if (!seenFirst) {
-            lastIdx = srcIdx;
-            spanStart = offset - 1n;
-            seenFirst = true;
-          } else if (srcIdx !== lastIdx) {
-            this.entrySpanIndex.ranges.push(
-              new GroupTagBounds(lastIdx, spanStart, offset - 1n),
-            );
-            lastIdx = srcIdx;
-            spanStart = offset;
-          }
-        }
+  findPageFor(index: bigint) : {offset: number, limit: number} | null {
+    if (!this.pageKeyIndex) return null
+    let start = null;
+    for(let page of this.pageKeyIndex) {
+      const min = page.min
+      const max = page.max
+      if (min == undefined || max == undefined) continue;
+      if (min <= index && max >= index) {
+        start = page.start_row;
+      }
+      if (min > index && start != null) {
+        return {offset: start, limit: (page.start_row ?? 0) - (start ?? 0)}
       }
     }
-    if (seenFirst) {
-      this.entrySpanIndex.ranges.push(
-        new GroupTagBounds(lastIdx, spanStart, offset - 1n),
-      );
-    }
-    return true;
+    return null
   }
 }
 
@@ -923,14 +894,15 @@ export class DataArraysReader {
   get rowGroupIndex(): RangeIndex {
     return this.metadata.rowGroupIndex;
   }
-  get entrySpanIndex(): RangeIndex {
-    return this.metadata.entrySpanIndex;
-  }
+
   get format(): BufferFormat {
     return this.metadata.format;
   }
-  get length(): number {
-    return this.metadata.entrySpanIndex.length;
+  get length(): number | undefined {
+    if (!this.metadata.pageKeyIndex) return 0;
+    if (this.metadata.pageKeyIndex.length == 0) return 0;
+    const val = this.metadata.pageKeyIndex[this.metadata.pageKeyIndex.length - 1].max;
+    return val ? bigIntToNumber(val) : 0;
   }
 
   get spacingModels(): Map<bigint, SpacingInterpolationModel> | null {
@@ -952,63 +924,26 @@ export class DataArraysReader {
     throw new Error("Data layout not recognized");
   }
 
-  async buildSpanIndex() {
-    if (!this.metadata.spanIndexReady) {
-      this.metadata.spanIndexReady = await this.metadata.buildSpanIndex(
-        this.handle,
-      );
-      if (!this.metadata.spanIndexReady) {
-        throw new Error("Span indices failed to load!");
-      }
-    }
-  }
-
-  indicesReady() {
-    return this.metadata.spanIndexReady;
-  }
-
   async get(key_: bigint | number): Promise<Arrow.Table | null> {
     const key = BigInt(key_);
-    if (this.indicesReady()) {
-      const rowGroups = this.rowGroupIndex.keysFor(key);
-      if (rowGroups.length === 0) return null;
-
-      const rowSpan = this.entrySpanIndex.findByKey(key);
-      if (rowSpan == null) return null;
-
-      // Offset: total rows in row groups before the first relevant one
-      let offset = 0n;
-      const pqMeta = this.handle.metadata();
-      const firstRg = Number(rowGroups[0]);
-      for (let i = 0; i < firstRg; i++) {
-        offset += BigInt(pqMeta.rowGroup(i).numRows());
-      }
-      const batches = streamArrowBatches(
-        this.handle,
-        rowGroups.map(Number),
-        undefined,
-        {
-          offset: bigIntToNumber(rowSpan.start - offset) - 1,
-          limit: bigIntToNumber(rowSpan.end - rowSpan.start) + 1,
-          batchSize: 32768,
-        },
-      );
-      const layoutReader = this.makeLayoutReader(batches);
-      return layoutReader.readRowsOf(key, 0n, rowSpan.end - rowSpan.start);
-    } else {
-      const rowGroups = this.rowGroupIndex.keysFor(key);
-      if (rowGroups.length === 0) return null;
-      const batches = streamArrowBatches(
-        this.handle,
-        rowGroups.map(Number),
-        undefined,
-        {
-          batchSize: 32768,
-        },
-      );
-      const layoutReader = this.makeLayoutReader(batches);
-      return layoutReader.readRowsOf(key, null, null);
+    const rowGroups = this.rowGroupIndex.keysFor(key);
+    if (rowGroups.length === 0) return null;
+    const offset = this.metadata.findPageFor(key);
+    const opts: ReaderOptions = {
+      batchSize: 32768,
+    };
+    if (offset != null) {
+      opts.offset = offset.offset
+      opts.limit = offset.limit
     }
+    const batches = streamArrowBatches(
+      this.handle,
+      rowGroups.map(Number),
+      undefined,
+      opts,
+    );
+    const layoutReader = this.makeLayoutReader(batches);
+    return layoutReader.readRowsOf(key, null, null);
   }
 
   enumerate(): DataStreamIterator {

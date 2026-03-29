@@ -12,8 +12,7 @@ import {
 
 } from "./layers";
 import { useSpectrumViewer, uuidv4 } from "../util";
-// import useMediaQuery from "@mui/material/useMediaQuery";
-import * as mzpeakts from 'mzpeakts';
+import useMediaQuery from "@mui/material/useMediaQuery";
 
 export interface SpectrumData {
   id: string;
@@ -26,106 +25,39 @@ export interface CanvasProps {
   spectrumData: SpectrumData | null;
 }
 
-export function SpectrumCanvasComponent() {
-  const canvasHolder = React.useRef<HTMLDivElement | null>(null);
-  const [canvas, setCanvas] = React.useState<
-    SpectrumCanvas | null
-  >(null);
-  const [canvasId] = React.useState(() => uuidv4());
-
-  const viewerState = useSpectrumViewer();
-  const spectrumData = viewerState.spectrumData;
-
-  // const isMobile = useMediaQuery("(max-width:500px)");
-
-  const canvasIsCompatibleWith = () => {
-    const yesSpec =
-      canvas instanceof SpectrumCanvas &&
-      spectrumData?.spectrum instanceof Spectrum;
-    return yesSpec
-  };
-
-  const createCanvas = () => {
-    if (canvasHolder.current) {
-      const isSpectrum = spectrumData?.spectrum instanceof mzpeakts.Spectrum;
-      if (canvas != null) {
-        canvas.clear();
-      }
-      if (isSpectrum) {
-        setCanvas(
-          new SpectrumCanvas(
-            `#${canvasHolder.current.id}`,
-            0,
-            0,
-            undefined,
-            [],
-            spectrumData?.id,
-            spectrumData?.scanRange
-          )
-        );
-      } else {
-      }
-    }
-  };
-
-  React.useLayoutEffect(() => {
-    createCanvas();
-  }, [canvasHolder]);
-
-  React.useEffect(() => {
-    if (canvas === null) {
-      if (spectrumData) {
-        createCanvas();
-        return;
-      } else {
-        return;
-      }
-    }
-    if (spectrumData == null) {
-      canvas.remove();
-      return;
-    }
-    if (!canvasIsCompatibleWith()) {
-      canvas.remove();
-      createCanvas();
-    }
-    const idMatch = canvas.spectrumID == spectrumData.id;
-    if (canvas.layers !== spectrumData.layers) {
-      let extent = canvas.extentCoordinateInterval;
-      if (canvas.layers.length) {
-        canvas.clear();
-      }
-      canvas.spectrumID = spectrumData.id;
-
-      canvas.render();
-      if (!idMatch) {
-        canvas.setExtentByCoordinate(undefined, undefined);
-      } else if (extent !== undefined) {
-        if (!(extent[0] === 0 && extent[1] === 0)) {
-          canvas.setExtentByCoordinate(extent[0], extent[1]);
-        }
-      }
-    }
-  }, [spectrumData, canvas]);
-  return (
-    <div>
-      <div className="spectrum-view-container">
-        <div
-          className="spectrum-canvas"
-          id={`spectrum-canvas-container-${canvasId}`}
-          ref={canvasHolder}
-        />
-      </div>
-    </div>
-  );
-}
-
 export enum CanvasActionType {
   SetData,
   CreateCanvas,
   ToggleFeatureProfiles,
   RenderCanvas,
+  ResizeCanvas,
 }
+
+function getWindowDimensions() {
+  const { innerWidth: width, innerHeight: height } = window;
+  return {
+    width,
+    height,
+  };
+}
+
+export default function useWindowDimensions() {
+  const [windowDimensions, setWindowDimensions] = React.useState(
+    getWindowDimensions(),
+  );
+
+  React.useEffect(() => {
+    function handleResize() {
+      setWindowDimensions(getWindowDimensions());
+    }
+
+    window.addEventListener("resize", handleResize);
+    return () => window.removeEventListener("resize", handleResize);
+  }, []);
+
+  return windowDimensions;
+}
+
 
 export type SpectrumCanvasAction =
   | { type: CanvasActionType.SetData; data: SpectrumData | null }
@@ -138,7 +70,12 @@ export type SpectrumCanvasAction =
     }
   | {
       type: CanvasActionType.RenderCanvas;
-    };
+    }
+  | {
+    type: CanvasActionType.ResizeCanvas;
+    width: number;
+    height: number;
+  };
 
 export class CanvasState {
   id: string;
@@ -146,6 +83,7 @@ export class CanvasState {
   canvas: SpectrumCanvas | null;
   showFeatureProfiles: boolean;
   canvasHolder: React.MutableRefObject<HTMLDivElement | null>;
+  windowSize: { width: number; height: number } | null;
 
   constructor(
     id: string,
@@ -153,12 +91,17 @@ export class CanvasState {
     canvas: SpectrumCanvas | null,
     showFeatureProfiles: boolean,
     canvasHolder: React.MutableRefObject<HTMLDivElement | null>,
+    windowSize?: { width: number; height: number },
   ) {
+    if (!windowSize) {
+      windowSize = getWindowDimensions();
+    }
     this.id = id;
     this.spectrumData = spectrumData;
     this.canvas = canvas;
     this.showFeatureProfiles = showFeatureProfiles;
     this.canvasHolder = canvasHolder;
+    this.windowSize = windowSize
   }
 
   copy() {
@@ -174,13 +117,7 @@ export class CanvasState {
   static createEmpty(
     canvasHolder: React.MutableRefObject<HTMLDivElement | null>,
   ) {
-    return new CanvasState(
-      uuidv4(),
-      null,
-      null,
-      false,
-      canvasHolder,
-    );
+    return new CanvasState(uuidv4(), null, null, false, canvasHolder);
   }
 
   isSpectrum() {
@@ -189,7 +126,7 @@ export class CanvasState {
 
   isCanvasCompatibleWithData() {
     const yesSpec = this.canvas instanceof SpectrumCanvas && this.isSpectrum();
-    return yesSpec
+    return yesSpec;
   }
 
   createCanvas() {
@@ -199,14 +136,20 @@ export class CanvasState {
         this.clearCanvas();
       }
       if (isSpectrum) {
+        let height = (this.windowSize?.height ?? 0) * 0.5;
+        const width = (this.windowSize?.width ?? 0) * 0.6;
+        if (width && height && height > (width * 1.5))  {
+          height = width
+        }
+        console.log("Window size", width, height)
         this.canvas = new SpectrumCanvas(
           `#${this.canvasHolder.current.id}`,
-          0,
-          0,
+          width,
+          height,
           undefined,
           [],
           this.spectrumData?.id,
-          this.spectrumData?.scanRange
+          this.spectrumData?.scanRange,
         );
       } else {
         this.clearCanvas();
@@ -223,7 +166,7 @@ export class CanvasState {
     if (this.canvasHolder.current) {
       while (this.canvasHolder.current.firstChild) {
         this.canvasHolder.current.removeChild(
-          this.canvasHolder.current.firstChild
+          this.canvasHolder.current.firstChild,
         );
       }
     }
@@ -259,7 +202,7 @@ export class CanvasState {
           this.canvas.setExtentByCoordinate(extent[0], extent[1]);
         }
       }
-      this.canvas.addLayers(this.spectrumData.layers as LayerBase<MZPoint>[])
+      this.canvas.addLayers(this.spectrumData.layers as LayerBase<MZPoint>[]);
       this.canvas.render();
     } else if (!idMatch) {
       this.clearCanvas();
@@ -307,6 +250,12 @@ const canvasReducer = (state: CanvasState, action: SpectrumCanvasAction) => {
       else nextState.clearCanvas();
       break;
     }
+    case CanvasActionType.ResizeCanvas: {
+      nextState.windowSize = {height: action.height, width: action.width}
+      nextState.createCanvas();
+      if (nextState.spectrumData) nextState.renderCanvas();
+      break;
+    }
     case CanvasActionType.ToggleFeatureProfiles: {
       nextState.showFeatureProfiles = !nextState.showFeatureProfiles;
       // Force canvas creation
@@ -318,7 +267,7 @@ const canvasReducer = (state: CanvasState, action: SpectrumCanvasAction) => {
   return nextState;
 };
 
-export function SpectrumCanvasComponent2() {
+export function SpectrumCanvasComponent() {
   const canvasHolder = React.useRef<HTMLDivElement | null>(null);
 
   const [state, dispatch] = React.useReducer(
@@ -329,13 +278,25 @@ export function SpectrumCanvasComponent2() {
   const viewerState = useSpectrumViewer();
   const spectrumData = viewerState.spectrumData;
 
-  // const isMobile = useMediaQuery("(max-width:500px)");
+  const isMobile = useMediaQuery("(max-width:500px)");
+
+  React.useEffect(() => {
+    function handleResize() {
+      const dims = getWindowDimensions()
+      dispatch({type: CanvasActionType.ResizeCanvas, ...dims})
+    }
+
+    window.addEventListener("resize", handleResize);
+    return () => window.removeEventListener("resize", handleResize);
+  }, []);
+
 
   React.useEffect(() => {
     dispatch({ type: CanvasActionType.SetData, data: spectrumData });
   }, [spectrumData]);
   return (
     <div>
+      {isMobile && <>foobar</>}
       <div className="spectrum-view-container">
         <div
           className="spectrum-canvas"

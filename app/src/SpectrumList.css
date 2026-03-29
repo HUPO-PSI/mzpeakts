@@ -9,3 +9,8 @@ td.current-spectrum {
 td.native-id-column {
     font-size: 0.8em;
 }
+
+td {
+    text-align: center;
+    padding: 3px;
+}
