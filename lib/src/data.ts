@@ -522,7 +522,7 @@ export class DataArraysReaderMeta {
     );
   }
 
-  findPageFor(index: bigint) : {offset: number, limit: number} | null {
+  findPageFor(index: bigint) : {offset: number, limit: number | null} | null {
     if (!this.pageKeyIndex) return null
     let start = null;
     for(let page of this.pageKeyIndex) {
@@ -533,7 +533,8 @@ export class DataArraysReaderMeta {
         start = page.start_row;
       }
       if (min > index && start != null) {
-        return {offset: start, limit: (page.start_row ?? 0) - (start ?? 0)}
+        const limit = (page.start_row ?? 0) - (start ?? 0)
+        return {offset: start, limit: limit == 0 ? null : limit}
       }
     }
     return null
@@ -934,8 +935,7 @@ export class DataArraysReader {
     };
     if (offset != null) {
       opts.offset = offset.offset
-      if (offset.limit == 0 && this.metadata.pageKeyIndex?.length == 1) {}
-      else {
+      if (offset.limit != null) {
         opts.limit = offset.limit;
       }
     }
