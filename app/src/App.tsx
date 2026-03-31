@@ -13,11 +13,13 @@ import {
 } from "./util";
 
 import AppBar from "@mui/material/AppBar";
+import Box from "@mui/material/Box";
 import Toolbar from "@mui/material/Toolbar";
 import Typography from "@mui/material/Typography";
 import { createTheme, styled } from '@mui/material/styles';
 import InstructionsDialog from "./Instructions"
 import { ThemeProvider } from '@emotion/react';
+import ErrorIcon from '@mui/icons-material/Error';
 
 const theme = createTheme({
   colorSchemes: {
@@ -51,6 +53,19 @@ export const Offset = styled("div")(({ theme }) => theme.mixins.toolbar);
 
 interface HeaderProps {
     children: string | JSX.Element | JSX.Element[]
+}
+
+function StatusDisplay() {
+  const { statusMessage } = useSpectrumViewer();
+  if (!statusMessage.text && !statusMessage.icon) return null;
+  return (
+    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mr: 2 }}>
+      {statusMessage.icon}
+      {statusMessage.text && (
+        <Typography variant="body2">{statusMessage.text}</Typography>
+      )}
+    </Box>
+  );
 }
 
 export function Header({ children }: HeaderProps) {
@@ -97,8 +112,20 @@ export function Frame() {
 
   useEffect(() => {
     if (dataUrl) {
+      viewStateDispatch({type: ViewerActionType.StatusMessage, text: `Loading from URL: ${dataUrl}`})
       MZPeakReader.fromUrl(dataUrl).then((value) => {
+        viewStateDispatch({
+          type: ViewerActionType.StatusMessage,
+          text: null,
+          icon: null,
+        });
         viewStateDispatch({ type: ViewerActionType.MZReader, value });
+      }).catch((err) => {
+        viewStateDispatch({
+          type: ViewerActionType.StatusMessage,
+          text: `Failed to load file from URL: ${err}`,
+          icon: <ErrorIcon color="error" />,
+        });
       });
     }
   }, [dataUrl]);
@@ -106,6 +133,7 @@ export function Frame() {
   return (
     <>
       <Header>
+        <StatusDisplay />
         <InstructionsDialog />
         <DataFileChooser dataFile={dataFile} setDataFile={setDataFile} setDataUrl={setDataUrl} />
       </Header>

@@ -74,26 +74,6 @@ const NUMPRESS_SLOF_CURIE = "MS:1002314";
 
 // ---- Internal helpers ----
 
-async function readArrowBatches(
-  handle: ParquetFile,
-  rowGroups?: number[],
-  columns?: string[],
-): Promise<Arrow.RecordBatch[]> {
-  const options: ReaderOptions = rowGroups != null ? { rowGroups } : {};
-  if (columns) options.columns = columns;
-  const tab = await handle.read(options);
-  const mem = wasmMemory();
-  const ffi = tab.intoFFI();
-  const arrowTab = ArrowFFI.parseTable(
-    mem.buffer,
-    ffi.arrayAddrs(),
-    ffi.schemaAddr(),
-    true,
-  );
-  ffi.free();
-  return arrowTab.batches;
-}
-
 async function* streamArrowBatches(
   handle: ParquetFile,
   rowGroups?: number[],
@@ -511,7 +491,6 @@ export class DataArraysReaderMeta {
       }
     }
 
-    const rowSpanBounds: GroupTagBounds[] = [];
     return new DataArraysReaderMeta(
       context,
       arrayIndex,

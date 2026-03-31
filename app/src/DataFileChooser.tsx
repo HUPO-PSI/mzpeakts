@@ -13,7 +13,11 @@ import FileOpenIcon from "@mui/icons-material/FileOpen";
 import LinkIcon from "@mui/icons-material/Link";
 import CheckCircleOutlineIcon from "@mui/icons-material/CheckCircleOutline";
 import ErrorOutlineIcon from "@mui/icons-material/ErrorOutline";
+import ErrorIcon from "@mui/icons-material/Error";
 import { store } from "mzpeakts";
+
+import { useSpectrumViewerDispatch, ViewerActionType } from "./util";
+import { ZipStorage } from "mzpeakts/src/store";
 
 type UrlValidationState =
   | { status: "idle" }
@@ -157,12 +161,45 @@ export function DataFileChooser({
   setDataFile,
   setDataUrl,
 }: DataFileChooserProps) {
-  const onChangeHandler = (e: ChangeEvent<HTMLInputElement>) => {
+  const dispatch = useSpectrumViewerDispatch();
+  const onChangeHandler = async (e: ChangeEvent<HTMLInputElement>) => {
     const target = e.currentTarget;
     if (target?.files && target.files.length > 0) {
       console.log(`Updating data file`, dataFile, target.files);
-      setDataFile(target.files[0]);
+      dispatch({
+        text: "Loading data file",
+        icon: <CircularProgress size={16} color="success" />,
+        type: ViewerActionType.StatusMessage,
+      });
+      try {
+        const store = (await ZipStorage.fromBlob(target.files[0]))
+        if (store.initialized) {
+          dispatch({
+            text: null,
+            icon: null,
+            type: ViewerActionType.StatusMessage,
+          });
+          setDataFile(target.files[0]);
+        } else {
+          dispatch({
+            text: "Failed to load from file",
+            icon: <ErrorIcon color="error" />,
+            type: ViewerActionType.StatusMessage,
+          });
+        }
+      } catch(err) {
+        dispatch({
+          text: `Failed to load from file: ${err}`,
+          icon: <ErrorIcon color="error" />,
+          type: ViewerActionType.StatusMessage,
+        });
+      }
     } else {
+      dispatch({
+        text: null,
+        icon: null,
+        type: ViewerActionType.StatusMessage,
+      });
       setDataFile(null);
     }
   };

@@ -8,7 +8,12 @@ import {
   MZPoint,
   PointLayer,
 } from "./canvas/layers";
-import { createContext, Dispatch, useContext, useReducer } from "react";
+import { createContext, Dispatch, ReactNode, useContext, useReducer } from "react";
+
+export type StatusMessage = {
+  text: string | null;
+  icon: ReactNode | null;
+};
 
 type SpectrumGroup = any
 
@@ -95,17 +100,20 @@ export class SpectrumViewerState {
   processingParams: ProcessingParams | null;
   mzReader: MZPeakReader<any> | null;
   currentSpectrumIdx: number | null;
+  statusMessage: StatusMessage;
 
   constructor(
     spectrumData: SpectrumData | null,
     processingParams: ProcessingParams,
     mzReader: MZPeakReader<any> | null,
     currentSpectrumIdx: number | null,
+    statusMessage: StatusMessage = { text: null, icon: null },
   ) {
     this.spectrumData = spectrumData;
     this.processingParams = processingParams;
     this.mzReader = mzReader;
     this.currentSpectrumIdx = currentSpectrumIdx;
+    this.statusMessage = statusMessage;
   }
 
   copy() {
@@ -114,6 +122,7 @@ export class SpectrumViewerState {
       this.processingParams,
       this.mzReader,
       this.currentSpectrumIdx,
+      this.statusMessage,
     );
   }
 
@@ -148,12 +157,14 @@ export enum ViewerActionType {
   MZReader,
   CurrentSpectrumIdx,
   ProcessingParams,
+  StatusMessage,
 }
 
 export type SpectrumViewerAction =
   | { type: ViewerActionType.MZReader; value: MZPeakReader<any> | null }
   | { type: ViewerActionType.ProcessingParams; value: ProcessingParams | null }
-  | { type: ViewerActionType.CurrentSpectrumIdx; value: number | null, spectrum?: Spectrum };
+  | { type: ViewerActionType.CurrentSpectrumIdx; value: number | null, spectrum?: Spectrum }
+  | { type: ViewerActionType.StatusMessage; text?: string | null; icon?: ReactNode | null };
 
 export const viewReducer = (
   state: SpectrumViewerState,
@@ -180,6 +191,13 @@ export const viewReducer = (
       if (action.value != null) {
         nextState.processingParams = action.value;
       }
+      break;
+    }
+    case ViewerActionType.StatusMessage: {
+      nextState.statusMessage = {
+        text: action.text !== undefined ? action.text : state.statusMessage.text,
+        icon: action.icon !== undefined ? action.icon : state.statusMessage.icon,
+      };
       break;
     }
   }
