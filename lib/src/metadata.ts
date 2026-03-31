@@ -5,7 +5,7 @@ import { ParquetFile, wasmMemory } from "parquet-wasm";
 import { binarySearch, binarySearchAll } from "./utils";
 import { bigIntToNumber } from "apache-arrow/util/bigint";
 import { SpacingInterpolationModel } from "./data";
-import { Spectrum } from "./record";
+import { Spectrum, Chromatogram } from './record';
 
 export class ParamColumnSpec {
   source: string;
@@ -536,14 +536,56 @@ export class ChromatogramMetadata extends MetadataReaderBase {
   get(index: number | bigint) {
     if (index >= this.length) throw new Error("Index out of range");
     let index_ = bigIntToNumber(index);
+    let index_n = BigInt(index);
     if (this.chromatograms == null) throw new Error("Invalid state");
-    const indexArr = this.chromatograms?.getChild(
+    let indexArr = this.chromatograms?.getChild(
       "index",
     ) as Arrow.Vector<Arrow.Uint64>;
     let row = indexArr.get(index_);
     if (row != BigInt(index)) {
       index_ = binarySearch(indexArr, BigInt(index));
     }
-    return this.chromatograms.get(index_);
+    const chromatogramRecord = this.chromatograms.get(index_)?.toJSON();
+    chromatogramRecord.parameters = Param.fromArrow(chromatogramRecord.parameters);
+
+    if (this.precursors != null) {
+      indexArr = this.precursors?.getChild(
+        "source_index",
+      ) as Arrow.Vector<Arrow.Uint64>;
+      let offsets = binarySearchAll(indexArr, index_n);
+      if (offsets) {
+        const precursorRecords = this.precursors.slice(offsets[0], offsets[1]);
+        chromatogramRecord.precursors = Array.from(precursorRecords).map((e) => {
+          if (!e) return e;
+          const conv = e.toJSON();
+          conv.isolation_window = conv.isolation_window.toJSON();
+          conv.activation = conv.activation.toJSON();
+          conv.activation.parameters = Param.fromArrow(
+            conv.activation.parameters,
+          );
+          return conv;
+        });
+      }
+    }
+
+    if (this.selectedIons != null) {
+      indexArr = this.selectedIons?.getChild(
+        "source_index",
+      ) as Arrow.Vector<Arrow.Uint64>;
+      let offsets = binarySearchAll(indexArr, index_n);
+      if (offsets) {
+        const ionRecords = this.selectedIons
+          .slice(offsets[0], offsets[1])
+          .toJSON();
+        chromatogramRecord.selectedIons = Array.from(ionRecords).map((e) => {
+          if (!e) return e;
+          const conv = e.toJSON();
+          conv.parameters = Param.fromArrow(conv.parameters);
+          return conv;
+        });
+      }
+    }
+
+    return Chromatogram.fromRecord(chromatogramRecord);
   }
 }

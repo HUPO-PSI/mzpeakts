@@ -934,7 +934,10 @@ export class DataArraysReader {
     };
     if (offset != null) {
       opts.offset = offset.offset
-      opts.limit = offset.limit
+      if (offset.limit == 0 && this.metadata.pageKeyIndex?.length == 1) {}
+      else {
+        opts.limit = offset.limit;
+      }
     }
     const batches = streamArrowBatches(
       this.handle,

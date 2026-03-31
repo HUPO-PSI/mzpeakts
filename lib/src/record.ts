@@ -279,3 +279,49 @@ export class Spectrum extends ParamDescribed {
     );
   }
 }
+
+export class Chromatogram extends ParamDescribed {
+  id: string;
+  index: bigint;
+  params: Param[];
+  precursors: Precursor[];
+  selectedIons: SelectedIon[];
+  meta: any | null;
+  dataArrays?: DataArrays;
+
+  constructor(
+    id: string,
+    index: bigint,
+    params: Param[],
+    precursors?: any[],
+    selectedIons?: any[],
+    meta?: any | null,
+    dataArrays?: DataArrays,
+  ) {
+    super(params);
+    this.id = id;
+    this.index = index;
+    this.params = params;
+    this.precursors = precursors ?? [];
+    this.selectedIons = selectedIons ?? [];
+    this.meta = meta ?? null;
+    this.dataArrays = dataArrays;
+  }
+
+  get rawArrays() {
+    return this.dataArrays;
+  }
+
+  static fromRecord(record: any) {
+    const parameters = record.parameters.map(Param.fromArrow);
+    return new Chromatogram(
+      record.id,
+      record.index,
+      parameters,
+      (record["precursors"] ?? []).map(Precursor.fromRecord),
+      (record["selectedIons"] ?? []).map(SelectedIon.fromRecord),
+      record,
+      record.dataArrays,
+    );
+  }
+}
