@@ -17,7 +17,7 @@ import Box from "@mui/material/Box";
 import Toolbar from "@mui/material/Toolbar";
 import Typography from "@mui/material/Typography";
 import { createTheme, styled } from '@mui/material/styles';
-import InstructionsDialog from "./Instructions"
+import FileMetadataDialog from "./FileMetadata"
 import { ThemeProvider } from '@emotion/react';
 import ErrorIcon from '@mui/icons-material/Error';
 
@@ -134,7 +134,7 @@ export function Frame() {
     <>
       <Header>
         <StatusDisplay />
-        <InstructionsDialog />
+        <FileMetadataDialog />
         <DataFileChooser dataFile={dataFile} setDataFile={setDataFile} setDataUrl={setDataUrl} />
       </Header>
 

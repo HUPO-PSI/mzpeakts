@@ -141,7 +141,6 @@ export class CanvasState {
         if (width && height && height > (width * 1.5))  {
           height = width
         }
-        console.log("Window size", width, height)
         this.canvas = new SpectrumCanvas(
           `#${this.canvasHolder.current.id}`,
           width,

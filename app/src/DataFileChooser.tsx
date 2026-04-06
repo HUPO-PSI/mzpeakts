@@ -53,6 +53,7 @@ function RemoteUrlModal({ onLoad }: RemoteUrlModalProps) {
       }
     } catch (err: any) {
       if (generation === validationGeneration.current) {
+        console.log(err)
         setValidation({
           status: "error",
           message: err?.message ?? "Invalid or unreachable URL",

@@ -84,8 +84,10 @@ async function* streamArrowBatches(
   options.rowGroups = rowGroups;
   if (columns) options.columns = columns;
   const tabStream = (await handle.stream(options)).values();
+  // const tabStream = (await handle.stream(options));
   const mem = wasmMemory();
   while (true) {
+  // for await (let batch of tabStream) {
     let batch = await tabStream.next();
     if (batch.done) break;
     let wBatch = batch.value;

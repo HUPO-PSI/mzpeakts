@@ -1,3 +1,4 @@
+// @ts-check
 import * as zip from "@zip.js/zip.js";
 import { ParquetFile, setPanicHook } from "parquet-wasm";
 
@@ -22,8 +23,6 @@ export class FileIndexEntry {
   data_kind: DataKind;
   entity_type: EntityType;
 
-
-
   constructor(name: string, data_kind: DataKind, entity_type: EntityType) {
     this.name = name;
     this.data_kind = data_kind;
@@ -38,7 +37,6 @@ export class FileIndexEntry {
     return this.entity_type;
   }
 }
-
 
 export class FileIndex {
   metadata: any;
@@ -59,7 +57,6 @@ export class FileIndex {
   }
 }
 
-
 export class ZipStorage<T> {
   reader: zip.Reader<T>;
   archive: zip.ZipReader<T>;
@@ -67,6 +64,15 @@ export class ZipStorage<T> {
   entries: zip.Entry[];
   initialized: boolean;
 
+  /**
+   * The raw constructor for `ZipStorage` that works directly on `zip.js`'s `Reader` base type.
+   *
+   * Prefer `fromUrl` or `fromBlob` for most cases as they automatically call `init` as well.
+   *
+   * @param reader The underlying ZIP reader
+   * @see ZipStorage.fromUrl - For initializing from URLs
+   * @see ZipStorage.fromBlob - For initializing from BLOBs
+   */
   constructor(reader: zip.Reader<T>) {
     this.reader = reader;
     this.archive = new zip.ZipReader(reader);
@@ -75,6 +81,12 @@ export class ZipStorage<T> {
     this.initialized = false;
   }
 
+  /**
+   * Open a `RemoteBlob` for the requested member of the ZIP archive by name
+   * @param {string} filename - The name of the file to open from the archive.
+   * @returns {RemoteBlob<T> | undefined} If `filename` is found, then a `RemoteBlob` is returned,
+   * otherwise `undefined` is returned instead.
+   */
   async open(filename: string): Promise<RemoteBlob<T> | undefined> {
     if (!this.initialized) await this.init();
 
@@ -83,18 +95,43 @@ export class ZipStorage<T> {
     return RemoteBlob.fromEntry(this.reader, entry);
   }
 
+  /**
+   * Create a `ZipStorage` instance from a URL.
+   * @param url The URL for the mzPeak file stored on an accessible server. If this is a cross-origin request, care must be taken to allow range request headers
+   * @returns {ZipStorage<zip.HttpRangeReader>} The storage configured for loading via HTTP requests.
+   */
   static async fromUrl(url: string | URL) {
-    const store = new ZipStorage(new zip.HttpRangeReader(url))
-    await store.init();
-    return store
-  }
-
-  static async fromBlob(blob: Blob) {
-    const store = new ZipStorage(new zip.BlobReader(blob))
+    const store = new ZipStorage(
+      new zip.HttpRangeReader(url, {
+        headers: [["Access-Control-Allow-Origin", "*"]],
+      }),
+    );
     await store.init();
     return store;
   }
 
+  /**
+   * Create a `ZipStorage` instance from a `Blob`-like object. This works with local files (including those attached to a browser window) or
+   * anything exposing a `Blob`-like API like `slice`, `size`, `arrayBuffer`, et. al.
+   * @param {Blob | RemoteBlob} blob The `Blob`-like object to read from. This might be a `RemoteBlob` too
+   * @returns {ZipStorage<zip.BlobReader>} The storage configured for loading content via `Blob.slice` calls
+   */
+  static async fromBlob(blob: Blob) {
+    const store = new ZipStorage(new zip.BlobReader(blob));
+    await store.init();
+    return store;
+  }
+
+  /**
+   * Open a ZIP archive member based upon its entry in `fileIndex`. This cannot open files not in the index
+   * and should not be used to open proprietary files listed in the index directly.
+   * @param entityType The `EntityType` to look up in the `fileIndex`
+   * @param dataKind The `DataKind` to look up in the `fileIndex`
+   * @returns {RemoteBlob<T> | undefined} If a matching entry is found, then a `RemoteBlob` is returned,
+   * otherwise `undefined` is returned instead.
+   *
+   * @see open
+   */
   async openFromIndex(
     entityType: EntityType,
     dataKind: DataKind,
@@ -167,6 +204,11 @@ export class ZipStorage<T> {
     return ParquetFile.fromFile(blob as any as Blob);
   }
 
+  /**
+   * Read the file index JSON file from the source and initialize the `fileIndex` property.
+   *
+   * @throws {Error} if the index JSON file is not found or not properly formatted.
+   */
   async init() {
     if (this.initialized) return;
 
@@ -183,21 +225,21 @@ export class ZipStorage<T> {
       }
     }
     if (!this.initialized) {
-      throw new Error(`File index did not contain "${FileIndex.FILE_NAME}", not a valid mzPeak ZIP!`)
+      throw new Error(
+        `File index did not contain "${FileIndex.FILE_NAME}", not a valid mzPeak ZIP!`,
+      );
     }
   }
 }
 
-
 export async function readZipHeaderSize<T>(blob: RemoteBlob<T>) {
-    const arrayBuffer = await blob.slice(0, 30).arrayBuffer();
-    const view = new DataView(arrayBuffer);
-    let offset = 30;
-    const nameSize = view.getUint16(26, true)
-    const extraSize = view.getUint16(28, true)
-    return offset + nameSize + extraSize
+  const arrayBuffer = await blob.slice(0, 30).arrayBuffer();
+  const view = new DataView(arrayBuffer);
+  let offset = 30;
+  const nameSize = view.getUint16(26, true);
+  const extraSize = view.getUint16(28, true);
+  return offset + nameSize + extraSize;
 }
-
 
 export class RemoteBlob<T> {
   source: zip.Reader<T>;
@@ -221,8 +263,6 @@ export class RemoteBlob<T> {
     blob.end += headerSize;
     return blob;
   }
-
-
 
   constructor(
     source: zip.Reader<T>,

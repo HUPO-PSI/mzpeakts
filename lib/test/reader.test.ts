@@ -105,6 +105,7 @@ test("point layout reader", async () => {
         expect.assert(mzArray[i] >= mzArray[i - 1], `Expected ${i} > ${i - 1}: ${mzArray[i]} < ${mzArray[i - 1]}`);
     }
   }
+  reader.fileMetadata
 });
 
 
@@ -127,5 +128,14 @@ test("iterator behavior", async () => {
         return v >= arr[i - 1];
       }
     }));
+  }
+})
+
+test("read remote", async () => {
+  try {
+    const reader = await MZPeakReader.fromUrl("http://localhost:8030/small.mzpeak")
+    expect.assert(reader.length == 48);
+  } catch(err) {
+    expect.assert((err as Error).message.match(/fetch failed/g))
   }
 })

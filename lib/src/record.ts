@@ -3,42 +3,46 @@ import { Param, ParamColumnSpec } from "./metadata";
 
 export class ParamDescribed {
   params: Param[];
-  meta?: any
+  meta?: any;
 
   constructor(params: Param[]) {
-    this.params = params
+    this.params = params;
   }
 
-  getParamByAccession(accession: string) : Param | undefined {
-    let value = this.params.find(p => p.accession == accession)
-    if (value != undefined) return value
+  get parameters() {
+    return this.params;
+  }
+
+  getParamByAccession(accession: string): Param | undefined {
+    let value = this.params.find((p) => p.accession == accession);
+    if (value != undefined) return value;
     else if (this.meta) {
-        for (let [key, val] of Object.entries(this.meta)) {
-            const spec = ParamColumnSpec.fromColumnName(key)
-            if (spec.accession == accession && !spec.isUnitOnly) {
-                return new Param(spec.name, val, spec.accession, spec.unit)
-            }
+      for (let [key, val] of Object.entries(this.meta)) {
+        const spec = ParamColumnSpec.fromColumnName(key);
+        if (spec.accession == accession && !spec.isUnitOnly) {
+          return new Param(spec.name, val, spec.accession, spec.unit);
         }
+      }
     }
-    return undefined
+    return undefined;
   }
 }
 
 export class ScanWindow {
-    lowerBound: number
-    upperBound: number
+  lowerBound: number;
+  upperBound: number;
 
-    constructor(lowerBound: number, upperBound: number) {
-        this.lowerBound = lowerBound
-        this.upperBound = upperBound
-    }
+  constructor(lowerBound: number, upperBound: number) {
+    this.lowerBound = lowerBound;
+    this.upperBound = upperBound;
+  }
 
-    static fromRecord(record: any) {
-        return new ScanWindow(
-            record["MS_1000501_scan_window_lower_limit_unit_MS_1000040"],
-            record["MS_1000500_scan_window_upper_limit_unit_MS_1000040"],
-        )
-    }
+  static fromRecord(record: any) {
+    return new ScanWindow(
+      record["MS_1000501_scan_window_lower_limit_unit_MS_1000040"],
+      record["MS_1000500_scan_window_upper_limit_unit_MS_1000040"],
+    );
+  }
 }
 
 export class Scan extends ParamDescribed {
@@ -59,7 +63,7 @@ export class Scan extends ParamDescribed {
     presetScanConfiguration?: number,
     meta?: any,
   ) {
-    super(params)
+    super(params);
     this.sourceIndex = sourceIndex;
     this.instrumentConfigurationRef = instrumentConfigurationRef;
     this.params = params;
@@ -96,11 +100,11 @@ export class IsolationWindow {
   }
 
   get lowerBound() {
-    return this.target - this.lowerOffset
+    return this.target - this.lowerOffset;
   }
 
   get upperBound() {
-    return this.target + this.upperOffset
+    return this.target + this.upperOffset;
   }
 
   static fromRecord(record: any) {
@@ -192,8 +196,8 @@ export class SelectedIon extends ParamDescribed {
 }
 
 export interface PointLike {
-    mz: number,
-    intensity: number
+  mz: number;
+  intensity: number;
 }
 
 export class Spectrum extends ParamDescribed {
@@ -204,7 +208,7 @@ export class Spectrum extends ParamDescribed {
   polarity: number;
   time: number;
   params: Param[];
-  scans: any[];
+  scans: Scan[];
   precursors: Precursor[];
   selectedIons: SelectedIon[];
   meta: any | null;
@@ -225,7 +229,7 @@ export class Spectrum extends ParamDescribed {
     meta?: any | null,
     dataArrays?: DataArrays,
   ) {
-    super(params)
+    super(params);
     this.id = id;
     this.index = index;
     this.msLevel = msLevel;

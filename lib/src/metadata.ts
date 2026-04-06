@@ -5,7 +5,7 @@ import { ParquetFile, wasmMemory } from "parquet-wasm";
 import { binarySearch, binarySearchAll } from "./utils";
 import { bigIntToNumber } from "apache-arrow/util/bigint";
 import { SpacingInterpolationModel } from "./data";
-import { Spectrum, Chromatogram } from './record';
+import { Spectrum, Chromatogram, ParamDescribed } from "./record";
 
 export class ParamColumnSpec {
   source: string;
@@ -101,17 +101,16 @@ export class Param {
   }
 }
 
-export class SourceFile {
+export class SourceFile extends ParamDescribed {
   id: string;
   name: string;
   location: string;
-  parameters: Param[];
 
   constructor(id: string, name: string, location: string, parameters: Param[]) {
+    super(parameters);
     this.id = id;
     this.name = name;
     this.location = location;
-    this.parameters = parameters;
   }
 
   static fromJSON(raw: any) {
@@ -138,40 +137,171 @@ export class FileDescription {
   }
 }
 
-export interface InstrumentComponent {
+export class InstrumentComponent extends ParamDescribed {
   componentType: string;
   order: number;
-  parameters: Param[];
+
+  constructor(componentType: string, order: number, parameters: Param[]) {
+    super(parameters);
+    this.componentType = componentType;
+    this.order = order;
+  }
+
+  static fromJSON(raw: any) {
+    const parameters = (raw.parameters as Array<any>).map(Param.fromJSON);
+    return new InstrumentComponent(raw.component_type, raw.order, parameters);
+  }
 }
 
-export interface InstrumentConfiguration {
+export class InstrumentConfiguration extends ParamDescribed {
   id: number;
   components: InstrumentComponent[];
   softwareReference?: string;
-  parameters: Param[];
+
+  constructor(
+    id: number,
+    components: InstrumentComponent[],
+    parameters: Param[],
+    softwareReference?: string,
+  ) {
+    super(parameters);
+    this.id = id;
+    this.components = components;
+    this.softwareReference = softwareReference;
+  }
+
+  static fromJSON(raw: any) {
+    const components = (raw.components as any[]).map(
+      InstrumentComponent.fromJSON,
+    );
+    const params = (raw.parameters as any[]).map(Param.fromJSON);
+    return new InstrumentConfiguration(
+      raw.id,
+      components,
+      params,
+      raw.software_reference,
+    );
+  }
 }
 
-export interface Software {
+export class ProcessingMethod extends ParamDescribed {
+  order: number;
+
+  constructor(order: number, parameters: Param[]) {
+    super(parameters);
+    this.order = order;
+  }
+
+  static fromJSON(raw: any) {
+    return new ProcessingMethod(
+      raw["order"],
+      (raw["parameters"] as any[]).map(Param.fromJSON),
+    );
+  }
+}
+
+export class DataProcessingMethod {
+  id: string;
+  methods: ProcessingMethod[];
+
+  constructor(id: string, methods: ProcessingMethod[]) {
+    this.id = id;
+    this.methods = methods;
+  }
+
+  static fromJSON(raw: any) {
+    return new DataProcessingMethod(
+      raw.id,
+      (raw["methods"] as any[]).map(ProcessingMethod.fromJSON),
+    );
+  }
+}
+
+export class Software extends ParamDescribed {
   id: string;
   version: string;
-  parameters: Param[];
+
+  constructor(id: string, version: string, parameters: Param[]) {
+    super(parameters);
+    this.id = id;
+    this.version = version;
+  }
+
+  static fromJSON(raw: any) {
+    return new Software(
+      raw.id,
+      raw.version,
+      (raw["parameters"] as any[]).map(Param.fromJSON),
+    );
+  }
+}
+
+export class Sample extends ParamDescribed {
+  id: string;
+  name: string;
+
+  constructor(id: string, name: string, parameters: Param[]) {
+    super(parameters);
+    this.id = id;
+    this.name = name;
+  }
+
+  static fromJSON(raw: any) {
+    return new Sample(
+      raw.id,
+      raw.name,
+      (raw["parameters"] as any[]).map(Param.fromJSON),
+    );
+  }
+}
+
+export class MSRun {
+  id: string;
+  defaultDataProcessingId?: string;
+  defaultInstrumentId?: number;
+  defaultSourceFileId?: string;
+  startTime?: Date;
+
+  constructor(
+    id: string,
+    defaultDataProcessingId?: string,
+    defaultInstrumentId?: number,
+    defaultSourceFileId?: string,
+    startTime?: Date,
+  ) {
+    this.id = id;
+    this.defaultDataProcessingId = defaultDataProcessingId;
+    this.defaultInstrumentId = defaultInstrumentId;
+    this.defaultSourceFileId = defaultSourceFileId;
+    this.startTime = startTime;
+  }
+
+  static fromJSON(raw: any) {
+    return new MSRun(
+      raw.id,
+      raw.default_data_processing_id,
+      raw.default_instrument_id,
+      raw.default_source_file_id,
+      raw.start_time ? new Date(raw.start_time) : undefined,
+    );
+  }
 }
 
 export class FileMetadata {
   fileDescription: FileDescription;
   instrumentConfigurations: InstrumentConfiguration[];
   software: Software[];
-  samples: any[];
-  dataProcessingMethods: any[];
-  run: any;
+  samples: Sample[];
+  dataProcessingMethods: DataProcessingMethod[];
+  run?: MSRun;
 
   constructor(
     fileDescription: FileDescription,
     instrumentConfigurations: InstrumentConfiguration[],
     software: Software[],
-    samples: any[],
-    dataProcessingMethods: any[],
-    run: any,
+    samples: Sample[],
+    dataProcessingMethods: DataProcessingMethod[],
+    run?: MSRun,
   ) {
     this.fileDescription = fileDescription;
     this.instrumentConfigurations = instrumentConfigurations ?? [];
@@ -182,23 +312,33 @@ export class FileMetadata {
   }
 
   static fromParquet(handle: ParquetFile) {
-    // TODO
     const meta = handle.metadata().fileMetadata().keyValueMetadata();
-    // const keys = [
-    //   "file_description",
-    //   "instrument_configuration_list",
-    //   "data_processing_method_list",
-    //   "software_list",
-    //   "sample_list",
-    //   "run",
-    // ];
-
     let raw = meta.get("file_description");
-    let fileDescription = raw
+    const fileDescription = raw
       ? FileDescription.fromJSON(JSON.parse(raw))
       : new FileDescription([], []);
-
-    return new FileMetadata(fileDescription, [], [], [], [], null);
+    raw = meta.get("instrument_configuration_list");
+    const instrumentConfigs = raw
+      ? (JSON.parse(raw) as any[]).map(InstrumentConfiguration.fromJSON)
+      : [];
+    raw = meta.get("data_processing_method_list");
+    const dpMethods = raw
+      ? JSON.parse(raw).map(DataProcessingMethod.fromJSON)
+      : [];
+    raw = meta.get("software_list");
+    const softwares = raw ? JSON.parse(raw).map(Software.fromJSON) : [];
+    raw = meta.get("sample_list");
+    const samples = raw ? JSON.parse(raw).map(Sample.fromJSON) : [];
+    raw = meta.get("run");
+    const run = raw ? MSRun.fromJSON(JSON.parse(raw)) : undefined;
+    return new FileMetadata(
+      fileDescription,
+      instrumentConfigs,
+      softwares,
+      samples,
+      dpMethods,
+      run,
+    );
   }
 }
 
@@ -546,7 +686,9 @@ export class ChromatogramMetadata extends MetadataReaderBase {
       index_ = binarySearch(indexArr, BigInt(index));
     }
     const chromatogramRecord = this.chromatograms.get(index_)?.toJSON();
-    chromatogramRecord.parameters = Param.fromArrow(chromatogramRecord.parameters);
+    chromatogramRecord.parameters = Param.fromArrow(
+      chromatogramRecord.parameters,
+    );
 
     if (this.precursors != null) {
       indexArr = this.precursors?.getChild(
@@ -555,16 +697,18 @@ export class ChromatogramMetadata extends MetadataReaderBase {
       let offsets = binarySearchAll(indexArr, index_n);
       if (offsets) {
         const precursorRecords = this.precursors.slice(offsets[0], offsets[1]);
-        chromatogramRecord.precursors = Array.from(precursorRecords).map((e) => {
-          if (!e) return e;
-          const conv = e.toJSON();
-          conv.isolation_window = conv.isolation_window.toJSON();
-          conv.activation = conv.activation.toJSON();
-          conv.activation.parameters = Param.fromArrow(
-            conv.activation.parameters,
-          );
-          return conv;
-        });
+        chromatogramRecord.precursors = Array.from(precursorRecords).map(
+          (e) => {
+            if (!e) return e;
+            const conv = e.toJSON();
+            conv.isolation_window = conv.isolation_window.toJSON();
+            conv.activation = conv.activation.toJSON();
+            conv.activation.parameters = Param.fromArrow(
+              conv.activation.parameters,
+            );
+            return conv;
+          },
+        );
       }
     }
 

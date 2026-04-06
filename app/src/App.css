@@ -12,3 +12,8 @@
 #application-header {
   text-align: start;
 }
+
+.metadata-section {
+  border-top: 1px solid gray;
+  border-collapse: collapse;
+}
