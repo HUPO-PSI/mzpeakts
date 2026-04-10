@@ -440,6 +440,38 @@ export class SpectrumMetadata extends MetadataReaderBase {
     this._selectedIons = null;
   }
 
+  timeRangeToIndices(start: number, end: number) {
+    if (!this._spectra) throw new Error("Cannot query spectrum indices, table not loaded")
+    const indexArr = this._spectra.getChildAt(0) as Arrow.Vector<Arrow.Uint64>;
+    const timeArr = this._spectra.getChild("time") as Arrow.Vector<Arrow.Float>;
+    let startedAt: number | null = null;
+
+    for(let i = 0; i < timeArr.length; i++) {
+      let val = timeArr.get(i)
+      if (val == null) continue
+      if (startedAt == null) {
+        if (val >= start) {
+          startedAt = i
+        }
+      }
+      else if (val > end) {
+        if (startedAt != null) {
+          return {start: indexArr.get(startedAt) as bigint, end: indexArr.get(i) as bigint}
+        } else {
+          return null
+        }
+      }
+    }
+    if (startedAt != null) {
+      return {
+        start: indexArr.get(startedAt) as bigint,
+        end: indexArr.get(indexArr.length - 1) as bigint,
+      };
+    } else {
+      return null;
+    }
+  }
+
   fileMetadata() {
     return FileMetadata.fromParquet(this.handle);
   }

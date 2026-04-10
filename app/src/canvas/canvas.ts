@@ -4,6 +4,7 @@ import {
   LayerBase,
   MZPoint,
   PointLike,
+  TimePoint,
 } from "./layers";
 import { uuidv4 } from "../util";
 
@@ -114,6 +115,10 @@ export class MSCanvasBase<T extends PointLike> {
     any
   > | null;
 
+  defaultLabels() {
+    return { xLabel: "m/z", yLabel: "relative intensity" };
+  }
+
   constructor(
     containerSelector: string,
     width: number,
@@ -147,7 +152,7 @@ export class MSCanvasBase<T extends PointLike> {
 
     this.dimensionLabels = dimensionLabels
       ? dimensionLabels
-      : { xLabel: "m/z", yLabel: "Relative Intensity" };
+      : this.defaultLabels();
 
     this.pointerXLabel = null;
     this.pointerYLabel = null;
@@ -543,3 +548,9 @@ export class MSCanvasBase<T extends PointLike> {
 }
 
 export class SpectrumCanvas extends MSCanvasBase<MZPoint> {}
+
+export class ChromatogramCanvas extends MSCanvasBase<TimePoint> {
+  defaultLabels() {
+    return { xLabel: "time", yLabel: "relative intensity" };
+  }
+}

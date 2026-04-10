@@ -12,6 +12,7 @@ import {
 } from "./array_index";
 import { FloatArray, IntArray } from "apache-arrow/type";
 import { bigIntToNumber } from 'apache-arrow/util/bigint';
+import { betweenSorted, intervalOverlaps, Span1D } from "./utils";
 
 export type DataArrays = Record<string, FloatArray | IntArray | string[]>;
 
@@ -200,8 +201,10 @@ interface JsStatistics<T> {
 interface JsDataPage<T> {
   min: T | undefined
   max: T | undefined
-  start_row: number | undefined
   null_count: number | undefined
+  row_group_index: number
+  start_row: number
+  end_row: number
 }
 
 /**
@@ -471,6 +474,8 @@ export class DataArraysReaderMeta {
               : BigInt(page.max),
           start_row: page.start_row,
           null_count: page.null_count,
+          end_row: page.end_row,
+          row_group_index: page.row_group_index
         };
       },
     ) as JsDataPage<bigint>[];
@@ -520,6 +525,42 @@ export class DataArraysReaderMeta {
     }
     return null
   }
+
+  findPageForRange(startIdx: bigint, endIdx: bigint) {
+    if (!this.pageKeyIndex) return null;
+    let start = null;
+    let limit = 0n
+    for(let page of this.pageKeyIndex) {
+      const min = page.min
+      const max = page.max
+      if (min == undefined || max == undefined) continue;
+      if (min <= startIdx && max >= startIdx) {
+        start = page.start_row;
+        limit += BigInt((page.end_row ?? 0) - (page.start_row ?? 0));
+      }
+      else if (start != null) {
+        limit += BigInt((page.end_row ?? 0) - (page.start_row ?? 0));
+      }
+      if (min > endIdx) {
+        if (start != null) {
+          return {
+            offset: start,
+            limit: limit == 0n ? null : bigIntToNumber(limit),
+          };
+        } else {
+          return null
+        }
+      }
+    } if (start) {
+      return {
+        offset: start,
+        limit: limit == 0n ? null : bigIntToNumber(limit),
+      };
+    } else {
+      return null
+    }
+  }
+
 }
 
 // ---- Layout readers ----
@@ -561,15 +602,26 @@ export class BaseLayoutReader {
   public arrayIndex: ArrayIndex;
   protected batches: AsyncIterableIterator<Arrow.RecordBatch>;
   protected spacingModels: Map<bigint, SpacingInterpolationModel> | undefined;
+  private _queryCoordinateRange: Span1D | null = null;
+
+  get queryCoordinateRange(): Span1D | null {
+    return this._queryCoordinateRange;
+  }
+
+  set queryCoordinateRange(value: Span1D | null) {
+    this._queryCoordinateRange = value;
+  }
 
   constructor(
     batches: AsyncIterableIterator<Arrow.RecordBatch>,
     arrayIndex: ArrayIndex,
     spacingModels?: Map<bigint, SpacingInterpolationModel>,
+    queryCoordinateRange: {start: number, end: number} | null = null,
   ) {
     this.batches = batches;
     this.arrayIndex = arrayIndex;
     this.spacingModels = spacingModels;
+    this.queryCoordinateRange = queryCoordinateRange
   }
 
   processSelectedRows(
@@ -600,6 +652,35 @@ export class BaseLayoutReader {
     }
 
     return this.processSelectedRows(entryIndex, rootStruct, selectedRows);
+  }
+
+  postprocessRowsOf(
+    entryIndex: bigint,
+    nBats: number,
+    accumulated: Record<string, Arrow.Vector[]>,
+  ) {
+    const final: Record<string, Arrow.Vector> = {};
+    if (nBats == 1) {
+      for (let [k, v] of Object.entries(accumulated)) {
+        const arrayMeta = this.arrayIndex.byFieldName.get(k);
+        final[arrayMeta?.arrayName ?? k] = this.handleTransforms(
+          arrayMeta,
+          entryIndex,
+          v[0],
+        );
+      }
+    } else {
+      for (let [k, v] of Object.entries(accumulated)) {
+        const arrayMeta = this.arrayIndex.byFieldName.get(k);
+        final[arrayMeta?.arrayName ?? k] = this.handleTransforms(
+          arrayMeta,
+          entryIndex,
+          combineVectors(v),
+        );
+      }
+    }
+
+    return Arrow.tableFromArrays(final as any);
   }
 
   async readRowsOf(
@@ -642,50 +723,31 @@ export class BaseLayoutReader {
       }
 
       const entries = this.processRows(entryIndex, rootStruct);
-      nBats += 1;
+      if (entries) {
+        nBats += 1;
 
-      const sizes: number[] = [];
+        const sizes: number[] = [];
 
-      for (let [k, v] of Object.entries(entries)) {
-        if (accumulated[k] == undefined) {
-          accumulated[k] = [v];
-          sizes.push(v.length);
-        } else {
-          accumulated[k].push(v);
-          sizes.push(
-            accumulated[k].map((x) => x.length).reduce((last, x) => last + x),
+        for (let [k, v] of Object.entries(entries)) {
+          if (accumulated[k] == undefined) {
+            accumulated[k] = [v];
+            sizes.push(v.length);
+          } else {
+            accumulated[k].push(v);
+            sizes.push(
+              accumulated[k].map((x) => x.length).reduce((last, x) => last + x),
+            );
+          }
+        }
+        if (!sizes.every((v) => v == sizes[0])) {
+          throw new Error(
+            `Not all arrays are the same length: ${sizes} for ${accumulated}`,
           );
         }
-      }
-      if (!sizes.every((v) => v == sizes[0])) {
-        throw new Error(
-          `Not all arrays are the same length: ${sizes} for ${accumulated}`,
-        );
-      }
-      rowCountRead += batchSize;
-    }
-    const final: Record<string, Arrow.Vector> = {};
-    if (nBats == 1) {
-      for (let [k, v] of Object.entries(accumulated)) {
-        const arrayMeta = this.arrayIndex.byFieldName.get(k);
-        final[arrayMeta?.arrayName ?? k] = this.handleTransforms(
-          arrayMeta,
-          entryIndex,
-          v[0],
-        );
-      }
-    } else {
-      for (let [k, v] of Object.entries(accumulated)) {
-        const arrayMeta = this.arrayIndex.byFieldName.get(k);
-        final[arrayMeta?.arrayName ?? k] = this.handleTransforms(
-          arrayMeta,
-          entryIndex,
-          combineVectors(v),
-        );
+        rowCountRead += batchSize;
       }
     }
-
-    return Arrow.tableFromArrays(final as any);
+    return this.postprocessRowsOf(entryIndex, nBats, accumulated);
   }
 
   handleTransforms(
@@ -728,6 +790,7 @@ export class PointLayoutReader extends BaseLayoutReader {
 export class ChunkLayoutReader extends BaseLayoutReader {
   private mainAxisEntry: ArrayIndexEntry | null = null;
   private chunkStartFieldName = "";
+  private chunkEndFieldName = "";
   private chunkEncodingFieldName = "";
   private chunkValuesFieldName = "";
   private secondaryFields: { name: string; entry: ArrayIndexEntry }[] = [];
@@ -747,6 +810,9 @@ export class ChunkLayoutReader extends BaseLayoutReader {
       switch (entry.bufferFormat) {
         case BufferFormat.ChunkStart:
           this.chunkStartFieldName = fieldName;
+          break;
+        case BufferFormat.ChunkEnd:
+          this.chunkEndFieldName = fieldName;
           break;
         case BufferFormat.ChunkEncoding:
           this.chunkEncodingFieldName = fieldName;
@@ -775,6 +841,7 @@ export class ChunkLayoutReader extends BaseLayoutReader {
     if (this.mainAxisEntry == null) throw new Error("Main axis cannot be null");
 
     const chunkStartVec = rootStruct.getChild(this.chunkStartFieldName)!;
+    const chunkEndVec = rootStruct.getChild(this.chunkEndFieldName)!;
     const chunkEncodingVec = rootStruct.getChild(
       this.chunkEncodingFieldName,
     ) as Arrow.Vector<Arrow.Utf8>;
@@ -793,12 +860,21 @@ export class ChunkLayoutReader extends BaseLayoutReader {
     const resultSecondary: Record<string, Arrow.Vector[]> = {};
     for (const { name } of this.secondaryFields) resultSecondary[name] = [];
 
+    const queryRange = this.queryCoordinateRange
+
     for (const rowIdx of selectedRows) {
       const startValue = Number(chunkStartVec.get(rowIdx) ?? 0);
       const encoding = chunkEncodingVec.get(rowIdx) ?? "";
       const chunkValues = chunkValuesVec.get(
         rowIdx,
       ) as Arrow.Vector<Arrow.Float> | null;
+      if (queryRange != null) {
+        const endValue = Number(chunkEndVec.get(rowIdx) ?? 0);
+        const rowSpan = {"start": startValue, "end": endValue}
+        if (!intervalOverlaps(rowSpan, queryRange)) {
+          continue
+        }
+      }
       if (chunkValues == null)
         throw new Error(
           `Chunk values cannot be null, but ${rowIdx} with start value ${startValue} for ${entryIndex} was`,
@@ -839,7 +915,32 @@ export class ChunkLayoutReader extends BaseLayoutReader {
         }
       }
     }
-
+    if (resultMainAxis.length == 0) {
+      const result: ColumnMap = {}
+      result[indexColName] = resultIndex.finish().toVector();
+      for(let e of this.arrayIndex.entries) {
+        switch (e.dataTypeCURIE) {
+          case "MS:1000523":
+            result[e.arrayName] = Arrow.makeVector(new Float64Array([]))
+            break;
+          case "MS:1000521":
+            result[e.arrayName] = Arrow.makeVector(new Float32Array([]));
+            break;
+          case "MS:1000519":
+            result[e.arrayName] = Arrow.makeVector(new Int32Array([]));
+            break;
+          case "MS:1000522":
+            result[e.arrayName] = Arrow.makeVector(new BigInt64Array([]));
+            break;
+          case "MS:1000479":
+            result[e.arrayName] = Arrow.makeVector(new Uint8Array([]));
+            break
+          default:
+            throw new Error(`Data type ${e.dataTypeCURIE} is not implemented`)
+        }
+      }
+      return result
+    }
     let mainAxisCombined = combineVectors(resultMainAxis);
     const result: ColumnMap = {
       [indexColName]: resultIndex.finish().toVector(),
@@ -883,7 +984,8 @@ export class DataArraysReader {
   get length(): number | undefined {
     if (!this.metadata.pageKeyIndex) return 0;
     if (this.metadata.pageKeyIndex.length == 0) return 0;
-    const val = this.metadata.pageKeyIndex[this.metadata.pageKeyIndex.length - 1].max;
+    const val =
+      this.metadata.pageKeyIndex[this.metadata.pageKeyIndex.length - 1].max;
     return val ? bigIntToNumber(val) : 0;
   }
 
@@ -915,7 +1017,7 @@ export class DataArraysReader {
       batchSize: 32768,
     };
     if (offset != null) {
-      opts.offset = offset.offset
+      opts.offset = offset.offset;
       if (offset.limit != null) {
         opts.limit = offset.limit;
       }
@@ -928,6 +1030,96 @@ export class DataArraysReader {
     );
     const layoutReader = this.makeLayoutReader(batches);
     return layoutReader.readRowsOf(key, null, null);
+  }
+
+  async getRange(start_: bigint | number, end_: bigint | number) {
+    const start = BigInt(start_);
+    const end = BigInt(end_);
+    const iter = await this._getRangeIter(start, end);
+    if (iter == null) return null;
+    const entries = [];
+    for await (const [idx, tab] of iter) {
+      if (idx < end) {
+        entries.push({ index: idx, dataArrays: tab });
+      } else {
+        break;
+      }
+    }
+    return entries;
+  }
+
+  async extractRangeFor(indexRange: {start: bigint | number, end: bigint | number} | null, coordinateRange: Span1D | null = null) {
+    let iter;
+    let endIdx = null
+    if (indexRange == null) {
+      iter = await this.enumerate()
+    } else {
+      iter = await this._getRangeIter(BigInt(indexRange.start), BigInt(indexRange.end))
+      endIdx = BigInt(indexRange.end);
+    }
+    if (iter == null) return []
+    const entries = []
+    if (coordinateRange) {
+      iter.setQueryCoordinateRange(coordinateRange)
+    }
+    const sortArr = this.arrayIndex.entries.reduce((last, e) => e.sortingRank != null && e.sortingRank < (last.sortingRank || Infinity) ? e : last)
+    for await (const [index, entry] of iter) {
+      if (endIdx != null && endIdx < index) break;
+      if (coordinateRange) {
+        const coordinatesOf = (entry as Arrow.Table).getChild(sortArr.arrayName);
+        if (!coordinatesOf) throw new Error(`Could not find ${sortArr} in ${entry.schema}`)
+        const idxRange = betweenSorted(coordinatesOf, coordinateRange.start, coordinateRange.end)
+        if (idxRange) {
+          entries.push([
+            index,
+            packTableIntoDataArrays((entry as Arrow.Table).slice(idxRange[0], idxRange[1]))
+          ])
+        }
+      } else {
+        entries.push([
+          index,
+          packTableIntoDataArrays(entry as Arrow.Table)
+        ])
+      }
+
+    }
+    return entries
+  }
+
+  async _getRangeIter(start: bigint, end: bigint) {
+    const rowGroupsStart = this.rowGroupIndex.keysFor(start);
+    const rowGroupsEnd = this.rowGroupIndex.keysFor(end);
+    let i = rowGroupsStart[0];
+    let skipped = 0
+    for(let j = 0; j < i; j++) {
+      skipped += this.handle.metadata().rowGroup(j).numRows()
+    }
+    const lastRgIdx = rowGroupsEnd[rowGroupsEnd.length - 1];
+    const rowGroupsTotal: bigint[] = [];
+    while (i <= lastRgIdx) {
+      rowGroupsTotal.push(i);
+      i++;
+    }
+    if (rowGroupsTotal.length === 0) return null;
+    const offset = this.metadata.findPageForRange(start, end);
+    const opts: ReaderOptions = {
+      batchSize: 32768,
+    };
+    if (offset != null) {
+      opts.offset = offset.offset;
+      if (offset.limit != null) {
+        opts.limit = offset.limit;
+      }
+    }
+    const batches = streamArrowBatches(
+      this.handle,
+      rowGroupsTotal.map(Number),
+      undefined,
+      opts,
+    );
+    const iter = new DataStreamIterator(this, batches);
+    await iter.seek(start);
+    return iter;
   }
 
   enumerate(): DataStreamIterator {
@@ -992,6 +1184,10 @@ export class DataStreamIterator
     if (!this._current)
       throw new Error("Iterator not initialized or exhausted");
     return this._current;
+  }
+
+  setQueryCoordinateRange(query: Span1D | null) {
+    this.layoutReader.queryCoordinateRange = query
   }
 
   private async readNextBatch(updateIndex: boolean = false) {

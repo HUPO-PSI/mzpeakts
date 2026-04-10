@@ -1,6 +1,10 @@
 /* tslint:disable */
 /* eslint-disable */
 /**
+ * Call this function at least once during initialization to get better error
+ */
+export function setPanicHook(): void;
+/**
  * Read a Parquet file into Arrow data.
  *
  * This returns an Arrow table in WebAssembly memory. To transfer the Arrow table to JavaScript
@@ -279,10 +283,6 @@ export function readParquetStream(url: string, content_length?: number | null): 
  */
 export function transformParquetStream(stream: ReadableStream, writer_properties?: WriterProperties | null): Promise<ReadableStream>;
 /**
- * Call this function at least once during initialization to get better error
- */
-export function setPanicHook(): void;
-/**
  * Returns a handle to this wasm instance's `WebAssembly.Memory`
  */
 export function wasmMemory(): Memory;
@@ -417,10 +417,6 @@ export enum WriterVersion {
  */
 type ReadableStreamType = "bytes";
 
-export type KeyValueMetadata = Map<string, string>;
-
-
-
 export type ReaderOptions = {
     /* The number of rows in each batch. If not provided, the upstream parquet default is 1024. */
     batchSize?: number;
@@ -435,6 +431,10 @@ export type ReaderOptions = {
     /* The number of concurrent requests to make in the async reader. */
     concurrency?: number;
 };
+
+
+
+export type KeyValueMetadata = Map<string, string>;
 
 
 

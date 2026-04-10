@@ -34,3 +34,4 @@ export * as arrayIndex from "./array_index";
 export { BufferContext } from "./array_index";
 export { MZPeakReader } from "./reader";
 export * as utils from "./utils";
+export * as data from "./data";

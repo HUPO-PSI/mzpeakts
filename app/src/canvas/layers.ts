@@ -143,6 +143,39 @@ export class LabeledPoint extends ChargedPoint implements PointLike {
   }
 }
 
+export class TimePoint implements PointLike {
+  time: number;
+  intensity: number;
+
+  constructor(time: number, intensity: number) {
+    this.time = time;
+    this.intensity = intensity;
+  }
+
+  static empty() {
+    return new MZPoint(0, 0);
+  }
+
+  get x() {
+    return this.time;
+  }
+
+  get y() {
+    return this.intensity;
+  }
+
+  set x(x: number) {
+    this.time = x;
+  }
+
+  set y(y: number) {
+    this.intensity = y;
+  }
+
+  asPoint(): PointLike {
+    return new TimePoint(this.time, this.intensity);
+  }
+}
 
 function pointToProfile<T extends PointLike>(points: T[]): T[] {
   const result = [];
@@ -162,7 +195,7 @@ function pointToProfile<T extends PointLike>(points: T[]): T[] {
 
 export abstract class LayerBase<T extends PointLike> {
   abstract get length(): number;
-  abstract get(i: number): T;
+  abstract get(i: number): PointLike;
   abstract initArtist(canvas: MSCanvasBase<T>): void;
   abstract onBrush(brush: d3.BrushBehavior<unknown>): void;
   abstract remove(): void;
@@ -173,7 +206,7 @@ export abstract class LayerBase<T extends PointLike> {
     return Array.from(this);
   }
 
-  [Symbol.iterator](): Iterator<T> {
+  [Symbol.iterator](): Iterator<PointLike> {
     let self = this;
     let i = 0;
     const iterator = {
@@ -515,35 +548,35 @@ export class LineArtist<T extends PointLike> extends DataLayer<T> {
 
 type NumericArray = Float32Array | Float64Array | number[];
 
-export class ProfileLayer extends DataLayer<MZPoint> {
+export class ProfileLayer<T extends PointLike> extends DataLayer<T> {
   get length(): number {
-    return this.mz.length;
+    return this.x.length;
   }
 
-  mz: NumericArray;
-  intensity: NumericArray;
+  x: NumericArray;
+  y: NumericArray;
   subsample: boolean;
 
-  constructor(mz: NumericArray, intensity: NumericArray, metadata: any) {
+  constructor(x: NumericArray, y: NumericArray, metadata: any) {
     super(metadata);
     this.subsample = false;
-    if (mz.length > 5e4) {
+    if (x.length > 5e4) {
       this.subsample = true;
     }
-    this.mz = mz;
-    this.intensity = intensity;
+    this.x = x;
+    this.y = y;
   }
 
   _makeData() {
     if (this.subsample) {
-      const spacing = subsampleResolutionSpacing(this.mz, 0.001);
-      let subsampledMz = arrayMask(this.mz, spacing);
-      let subsampledIntensity = arrayMask(this.intensity, spacing);
+      const spacing = subsampleResolutionSpacing(this.x, 0.001);
+      let subsampledX = arrayMask(this.x, spacing);
+      let subsampledIntensity = arrayMask(this.y, spacing);
       const liveIndices = dropZeroRuns(subsampledIntensity);
-      subsampledMz = arrayMask(subsampledMz, liveIndices);
+      subsampledX = arrayMask(subsampledX, liveIndices);
       subsampledIntensity = arrayMask(subsampledIntensity, liveIndices);
-      return subsampledMz.map((mz, i) => {
-        return new MZPoint(mz, subsampledIntensity[i]);
+      return subsampledX.map((x, i) => {
+        return new MZPoint(x, subsampledIntensity[i]);
       });
     } else {
       return this.asArray();
@@ -551,26 +584,26 @@ export class ProfileLayer extends DataLayer<MZPoint> {
   }
 
   get(i: number) {
-    return new MZPoint(this.mz[i], this.intensity[i]);
+    return new MZPoint(this.x[i], this.y[i]);
   }
 
   get basePeak() {
     let bestIndex = 0;
     let bestValue = -1;
     for (let i = 0; i < this.length; i++) {
-      let val = this.intensity[i];
+      let val = this.y[i];
       if (val > bestValue) {
         bestValue = val;
         bestIndex = i;
       }
     }
-    return new MZPoint(this.mz[bestIndex], this.intensity[bestIndex]);
+    return new MZPoint(this.x[bestIndex], this.y[bestIndex]);
   }
 
   slice(begin: number, end: number): LayerBase<MZPoint> {
     return new ProfileLayer(
-      this.mz.slice(begin, end),
-      this.intensity.slice(begin, end),
+      this.x.slice(begin, end),
+      this.y.slice(begin, end),
       this.metadata
     );
   }
