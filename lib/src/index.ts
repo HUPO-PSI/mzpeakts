@@ -22,6 +22,7 @@ export {
   Precursor,
   Scan,
   IsolationWindow,
+  Chromatogram
 } from "./record";
 export {
   DataArraysReader,
@@ -33,5 +34,6 @@ export {
 export * as arrayIndex from "./array_index";
 export { BufferContext } from "./array_index";
 export { MZPeakReader } from "./reader";
+export type { XIC, XICPoint } from "./reader";
 export * as utils from "./utils";
 export * as data from "./data";

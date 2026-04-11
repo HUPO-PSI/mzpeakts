@@ -171,7 +171,12 @@ export interface Span1D {
   end: number;
 }
 
-export function intervalContains(span: Span1D, value: number) {
+export interface Span1DBigInt {
+    start: bigint,
+    end: bigint
+}
+
+export function intervalContains(span: Span1D | Span1DBigInt, value: number | bigint) {
   return span.start <= value && span.end >= value;
 }
 

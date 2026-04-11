@@ -1,3 +1,5 @@
+import * as Arrow from "apache-arrow";
+
 export enum BufferFormat {
   Point = "point",
   ChunkValues = "chunk_values",
@@ -10,15 +12,23 @@ export enum BufferFormat {
 
 export function bufferFormatFromString(s: string): BufferFormat {
   switch (s) {
-    case "point": return BufferFormat.Point;
-    case "chunk_values": return BufferFormat.ChunkValues;
-    case "chunk_start": return BufferFormat.ChunkStart;
-    case "chunk_end": return BufferFormat.ChunkEnd;
-    case "chunk_encoding": return BufferFormat.ChunkEncoding;
+    case "point":
+      return BufferFormat.Point;
+    case "chunk_values":
+      return BufferFormat.ChunkValues;
+    case "chunk_start":
+      return BufferFormat.ChunkStart;
+    case "chunk_end":
+      return BufferFormat.ChunkEnd;
+    case "chunk_encoding":
+      return BufferFormat.ChunkEncoding;
     case "secondary_chunk":
-    case "chunk_secondary": return BufferFormat.ChunkSecondary;
-    case "chunk_transform": return BufferFormat.ChunkTransform;
-    default: throw new Error(`${s} is not a recognized buffer format`);
+    case "chunk_secondary":
+      return BufferFormat.ChunkSecondary;
+    case "chunk_transform":
+      return BufferFormat.ChunkTransform;
+    default:
+      throw new Error(`${s} is not a recognized buffer format`);
   }
 }
 
@@ -35,17 +45,23 @@ export enum BufferContext {
 
 export function bufferContextIndexName(context: BufferContext): string {
   switch (context) {
-    case BufferContext.Spectrum: return "spectrum_index";
-    case BufferContext.Chromatogram: return "chromatogram_index";
-    case BufferContext.WavelengthSpectrum: return "wavelength_spectrum_index";
+    case BufferContext.Spectrum:
+      return "spectrum_index";
+    case BufferContext.Chromatogram:
+      return "chromatogram_index";
+    case BufferContext.WavelengthSpectrum:
+      return "wavelength_spectrum_index";
   }
 }
 
 export function bufferContextName(context: BufferContext): string {
   switch (context) {
-    case BufferContext.Spectrum: return "spectrum";
-    case BufferContext.Chromatogram: return "chromatogram";
-    case BufferContext.WavelengthSpectrum: return "wavelength_spectrum";
+    case BufferContext.Spectrum:
+      return "spectrum";
+    case BufferContext.Chromatogram:
+      return "chromatogram";
+    case BufferContext.WavelengthSpectrum:
+      return "wavelength_spectrum";
   }
 }
 
@@ -139,8 +155,57 @@ export class ArrayIndexEntry {
   }
 
   get fieldName() {
-    const tokens = this.path.split(".")
-    return tokens[tokens.length - 1]
+    const tokens = this.path.split(".");
+    return tokens[tokens.length - 1];
+  }
+
+  arrowBuilder() {
+    switch (this.dataTypeCURIE) {
+      case "MS:1000523":
+        return Arrow.makeBuilder({
+          type: new Arrow.Float64(),
+          nullValues: [null, undefined],
+        });
+      case "MS:1000521":
+        return Arrow.makeBuilder({
+          type: new Arrow.Float32(),
+          nullValues: [null, undefined],
+        });
+      case "MS:1000519":
+        return Arrow.makeBuilder({
+          type: new Arrow.Int32(),
+          nullValues: [null, undefined],
+        });
+      case "MS:1000522":
+        return Arrow.makeBuilder({
+          type: new Arrow.Int64(),
+          nullValues: [null, undefined],
+        });
+      case "MS:1000479":
+        return Arrow.makeBuilder({
+          type: new Arrow.Uint8(),
+          nullValues: [null, undefined],
+        });
+      default:
+        throw new Error(`Data type ${this.dataTypeCURIE} is not implemented`);
+    }
+  }
+
+  emptyArrow() {
+    switch (this.dataTypeCURIE) {
+      case "MS:1000523":
+        return Arrow.makeVector(new Float64Array([]));
+      case "MS:1000521":
+        return Arrow.makeVector(new Float32Array([]));
+      case "MS:1000519":
+        return Arrow.makeVector(new Int32Array([]));
+      case "MS:1000522":
+        return Arrow.makeVector(new BigInt64Array([]));
+      case "MS:1000479":
+        return Arrow.makeVector(new Uint8Array([]));
+      default:
+        throw new Error(`Data type ${this.dataTypeCURIE} is not implemented`);
+    }
   }
 }
 

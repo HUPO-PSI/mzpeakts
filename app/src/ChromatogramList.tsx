@@ -1,5 +1,5 @@
 import { forwardRef, Fragment, } from "react";
-import { MZPeakReader, Spectrum, SpectrumMetadata } from "mzpeakts";
+import { ChromatogramMetadata, MZPeakReader, Chromatogram } from "mzpeakts";
 import "./SpectrumList.css";
 
 import {
@@ -20,11 +20,11 @@ import {
 } from "./util";
 import React from "react";
 
-export interface RowContext {
+interface RowContext {
   clickHandler: Function;
 }
 
-export const VirtuosoTableComponents: TableComponents<Spectrum, RowContext> = {
+const VirtuosoTableComponents: TableComponents<Chromatogram, RowContext> = {
   Scroller: forwardRef<HTMLDivElement>((props, ref) => (
     <TableContainer component={Paper} {...props} ref={ref} />
   )),
@@ -59,7 +59,7 @@ export const VirtuosoTableComponents: TableComponents<Spectrum, RowContext> = {
   )),
 };
 
-export interface Column {
+interface Column {
   name: string;
   format?: Function | undefined;
   numeric: boolean;
@@ -69,11 +69,11 @@ export interface Column {
   eager: boolean
 }
 
-export const columnDefs: Column[] = [
+const columnDefs: Column[] = [
   {
     name: "Index",
     numeric: true,
-    getter: (spectrum: Spectrum) => {
+    getter: (spectrum: Chromatogram) => {
       return spectrum.index.toString();
     },
     eager: true,
@@ -81,17 +81,10 @@ export const columnDefs: Column[] = [
   {
     name: "Native ID",
     numeric: false,
-    getter: (spectrum: Spectrum) => spectrum.id,
+    getter: (spectrum: Chromatogram) => spectrum.id,
     width: 350,
     class: "native-id-column",
     eager: false,
-  },
-  {
-    name: "Time",
-    numeric: true,
-    format: (x: number) => x.toFixed(3),
-    getter: (spectrum: Spectrum) => spectrum.time,
-    eager: true,
   },
   // {
   //   name: "Base Peak m/z",
@@ -111,26 +104,20 @@ export const columnDefs: Column[] = [
   //   eager: false,
   // },
   {
-    name: "MS Level",
-    numeric: true,
-    getter: (spectrum: Spectrum) => spectrum.msLevel,
-    eager: true,
-  },
-  {
     name: "Prec. m/z",
     numeric: true,
     format: (x: number) => x.toFixed(3),
-    getter: (spectrum: Spectrum) => {
-      return spectrum.selectedIons.length ? spectrum.selectedIons[0].mz : null;
+    getter: (chromatogram: Chromatogram) => {
+      return chromatogram.selectedIons.length ? chromatogram.selectedIons[0].mz : null;
     },
     eager: true,
   },
   {
     name: "Prec. z",
     numeric: true,
-    getter: (spectrum: Spectrum) =>
-      spectrum.selectedIons.length
-        ? spectrum.selectedIons[0].chargeState
+    getter: (chromatogram: Chromatogram) =>
+      chromatogram.selectedIons.length
+        ? chromatogram.selectedIons[0].chargeState
         : null,
     eager: true,
   },
@@ -163,7 +150,7 @@ export function fixedHeaderContent() {
 
 export function rowContentBasic(
   index: number,
-  handle: SpectrumMetadata,
+  handle: ChromatogramMetadata,
   currentSpectrumID: string | undefined,
 ) {
   const row = handle.get(index)
@@ -187,12 +174,6 @@ export function rowContentBasic(
       >
         {row.id}
       </TableCell>
-      <TableCell key="time" style={style} className={className}>
-        {row.time}
-      </TableCell>
-      <TableCell key="ms-level" style={style} className={className}>
-        {row.msLevel}
-      </TableCell>
       <TableCell key="precursor-mz" style={style} className={className}>
         {selIon?.mz?.toFixed(3)}
       </TableCell>
@@ -204,16 +185,16 @@ export function rowContentBasic(
 }
 
 
-export function rowContentBasicProp(props: {
+function rowContentBasicProp(props: {
   index: number,
-  handle: SpectrumMetadata,
+  handle: ChromatogramMetadata,
   currentSpectrumID: string | undefined,
 }) {
   return rowContentBasic(props.index, props.handle, props.currentSpectrumID)
 }
 
 
-export const RowContentMemo = React.memo(
+const RowContentMemo = React.memo(
   rowContentBasicProp,
   (prevProps, nextProps) => {
     return prevProps.index == nextProps.index && prevProps.currentSpectrumID == nextProps.currentSpectrumID;
@@ -221,17 +202,18 @@ export const RowContentMemo = React.memo(
 );
 
 
-export function VirtualizedTable() {
+function VirtualizedTable() {
   const viewerDispatch = useSpectrumViewerDispatch();
   const viewerState = useSpectrumViewer();
   const mzReader = viewerState.mzReader;
   const onClick = async (index: number) => {
     if (mzReader) {
-      const spectrum = await mzReader.getSpectrum(index);
+        const chromatogram = await mzReader.getChromatogram(index);
+        console.log("Dispatching chromatogram", index, chromatogram)
       viewerDispatch({
-        type: ViewerActionType.CurrentSpectrumIdx,
+        type: ViewerActionType.CurrentChromatogramIdx,
         value: index,
-        spectrum: spectrum,
+        chromatogram,
       });
     }
   };
@@ -250,12 +232,12 @@ export function VirtualizedTable() {
         }}
       >
         <TableVirtuoso
-          totalCount={mzReader ? mzReader.length : 0}
+          totalCount={mzReader ? mzReader.chromatogramMetadata?.length : 0}
           itemContent={(index: number) => {
             const reader = mzReader as MZPeakReader<any>;
-            const metaReader = reader.spectrumMetadata;
+            const metaReader = reader.chromatogramMetadata;
             if (metaReader == null)
-              throw new Error("Cannot handle missing spectra");
+              throw new Error("Cannot handle missing chromatograms");
 
             return (
               <RowContentMemo
@@ -275,6 +257,6 @@ export function VirtualizedTable() {
   );
 }
 
-export function SpectrumList() {
+export function ChromatogramList() {
   return VirtualizedTable();
 }

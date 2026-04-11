@@ -548,6 +548,10 @@ export class LineArtist<T extends PointLike> extends DataLayer<T> {
 
 type NumericArray = Float32Array | Float64Array | number[];
 
+interface ProfileOptions {
+  subsample?: boolean
+}
+
 export class ProfileLayer<T extends PointLike> extends DataLayer<T> {
   get length(): number {
     return this.x.length;
@@ -557,11 +561,14 @@ export class ProfileLayer<T extends PointLike> extends DataLayer<T> {
   y: NumericArray;
   subsample: boolean;
 
-  constructor(x: NumericArray, y: NumericArray, metadata: any) {
+  constructor(x: NumericArray, y: NumericArray, metadata: ProfileOptions) {
     super(metadata);
     this.subsample = false;
     if (x.length > 5e4) {
       this.subsample = true;
+    }
+    if (metadata.subsample != undefined) {
+      this.subsample = Boolean(metadata.subsample);
     }
     this.x = x;
     this.y = y;
@@ -604,7 +611,7 @@ export class ProfileLayer<T extends PointLike> extends DataLayer<T> {
     return new ProfileLayer(
       this.x.slice(begin, end),
       this.y.slice(begin, end),
-      this.metadata
+      this.metadata,
     );
   }
 

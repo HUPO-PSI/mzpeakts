@@ -318,9 +318,16 @@ export class MSCanvasBase<T extends PointLike> {
     this.xAxis = this.container
       .append("g")
       .attr("transform", `translate(0, ${this.height})`)
-      .call(d3.axisBottom(this.xScale));
+      .call(d3.axisBottom(this.xScale).tickFormat((val, _) => {
+        console.log(val)
+        return val.toString()
+      }));
 
-    this.yAxis = this.container.append("g").call(d3.axisLeft(this.yScale));
+    this.yAxis = this.container.append("g").call(
+      d3.axisLeft(this.yScale).tickFormat((val, _) => {
+        return Number(val).toExponential(3);
+      }),
+    );
 
     this.clip = this.container
       .append("defs")
@@ -497,7 +504,11 @@ export class MSCanvasBase<T extends PointLike> {
     this.yAxis
       ?.transition()
       .duration(animateDuration)
-      .call(d3.axisLeft(this.yScale));
+      .call(
+        d3.axisLeft(this.yScale).tickFormat((val, _) => {
+          return Number(val).toExponential(3);
+        }),
+      );
     if (this.brush != null) {
       const brush = this.brush;
       this.layers.map((layer) => layer.onBrush(brush));

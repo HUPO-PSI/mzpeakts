@@ -11,7 +11,7 @@ import {
   bufferContextName,
 } from "./array_index";
 import { FloatArray, IntArray } from "apache-arrow/type";
-import { bigIntToNumber } from 'apache-arrow/util/bigint';
+import { bigIntToNumber } from "apache-arrow/util/bigint";
 import { betweenSorted, intervalOverlaps, Span1D } from "./utils";
 
 export type DataArrays = Record<string, FloatArray | IntArray | string[]>;
@@ -26,23 +26,23 @@ export function packTableIntoDataArrays(table: Arrow.Table): DataArrays {
 }
 
 export function packTableIntoPeaks(table: Arrow.Table) {
-  const dataArrays = packTableIntoDataArrays(table)
-  const peaks = []
-  let i = 0
-  for(let [k, vs] of Object.entries(dataArrays)) {
+  const dataArrays = packTableIntoDataArrays(table);
+  const peaks = [];
+  let i = 0;
+  for (let [k, vs] of Object.entries(dataArrays)) {
     const key = k.split(" ").slice(0, -1).join("_").replace("/", "");
     if (i == 0) {
-      for(let v of vs) {
-        peaks.push({[key]: v})
+      for (let v of vs) {
+        peaks.push({ [key]: v });
       }
       i += 1;
     } else {
-      for(let j = 0; j < vs.length; j++) {
-        peaks[j][key] = vs[j]
+      for (let j = 0; j < vs.length; j++) {
+        peaks[j][key] = vs[j];
       }
     }
   }
-  return peaks
+  return peaks;
 }
 
 export class SpacingInterpolationModel {
@@ -88,7 +88,7 @@ async function* streamArrowBatches(
   // const tabStream = (await handle.stream(options));
   const mem = wasmMemory();
   while (true) {
-  // for await (let batch of tabStream) {
+    // for await (let batch of tabStream) {
     let batch = await tabStream.next();
     if (batch.done) break;
     let wBatch = batch.value;
@@ -199,12 +199,12 @@ interface JsStatistics<T> {
 }
 
 interface JsDataPage<T> {
-  min: T | undefined
-  max: T | undefined
-  null_count: number | undefined
-  row_group_index: number
-  start_row: number
-  end_row: number
+  min: T | undefined;
+  max: T | undefined;
+  null_count: number | undefined;
+  row_group_index: number;
+  start_row: number;
+  end_row: number;
 }
 
 /**
@@ -475,7 +475,7 @@ export class DataArraysReaderMeta {
           start_row: page.start_row,
           null_count: page.null_count,
           end_row: page.end_row,
-          row_group_index: page.row_group_index
+          row_group_index: page.row_group_index,
         };
       },
     ) as JsDataPage<bigint>[];
@@ -508,37 +508,36 @@ export class DataArraysReaderMeta {
     );
   }
 
-  findPageFor(index: bigint) : {offset: number, limit: number | null} | null {
-    if (!this.pageKeyIndex) return null
+  findPageFor(index: bigint): { offset: number; limit: number | null } | null {
+    if (!this.pageKeyIndex) return null;
     let start = null;
-    for(let page of this.pageKeyIndex) {
-      const min = page.min
-      const max = page.max
+    for (let page of this.pageKeyIndex) {
+      const min = page.min;
+      const max = page.max;
       if (min == undefined || max == undefined) continue;
-      if (min <= index && max >= index) {
+      if (min <= index && max >= index && start == null) {
         start = page.start_row;
       }
       if (min > index && start != null) {
-        const limit = (page.start_row ?? 0) - (start ?? 0)
-        return {offset: start, limit: limit == 0 ? null : limit}
+        const limit = (page.start_row ?? 0) - (start ?? 0);
+        return { offset: start, limit: limit == 0 ? null : limit };
       }
     }
-    return null
+    return null;
   }
 
   findPageForRange(startIdx: bigint, endIdx: bigint) {
     if (!this.pageKeyIndex) return null;
     let start = null;
-    let limit = 0n
-    for(let page of this.pageKeyIndex) {
-      const min = page.min
-      const max = page.max
+    let limit = 0n;
+    for (let page of this.pageKeyIndex) {
+      const min = page.min;
+      const max = page.max;
       if (min == undefined || max == undefined) continue;
-      if (min <= startIdx && max >= startIdx) {
+      if (min <= startIdx && max >= startIdx && start == null) {
         start = page.start_row;
         limit += BigInt((page.end_row ?? 0) - (page.start_row ?? 0));
-      }
-      else if (start != null) {
+      } else if (start != null) {
         limit += BigInt((page.end_row ?? 0) - (page.start_row ?? 0));
       }
       if (min > endIdx) {
@@ -548,19 +547,19 @@ export class DataArraysReaderMeta {
             limit: limit == 0n ? null : bigIntToNumber(limit),
           };
         } else {
-          return null
+          return null;
         }
       }
-    } if (start) {
+    }
+    if (start) {
       return {
         offset: start,
         limit: limit == 0n ? null : bigIntToNumber(limit),
       };
     } else {
-      return null
+      return null;
     }
   }
-
 }
 
 // ---- Layout readers ----
@@ -616,12 +615,12 @@ export class BaseLayoutReader {
     batches: AsyncIterableIterator<Arrow.RecordBatch>,
     arrayIndex: ArrayIndex,
     spacingModels?: Map<bigint, SpacingInterpolationModel>,
-    queryCoordinateRange: {start: number, end: number} | null = null,
+    queryCoordinateRange: { start: number; end: number } | null = null,
   ) {
     this.batches = batches;
     this.arrayIndex = arrayIndex;
     this.spacingModels = spacingModels;
-    this.queryCoordinateRange = queryCoordinateRange
+    this.queryCoordinateRange = queryCoordinateRange;
   }
 
   processSelectedRows(
@@ -632,6 +631,15 @@ export class BaseLayoutReader {
     const result: ColumnMap = {};
     for (const field of rootStruct.type.children) {
       const vec = rootStruct.getChild(field.name)!;
+      const isAllNull = vec.nullCount == selectedRows.length;
+      /*
+      We have already collected an array of this name, so this must be another dimension not present
+      in this particular observation, e.g. when there are multiple intensity arrays with different units,
+      so do not overwrite the existing array.
+      */
+      if (isAllNull) {
+        continue;
+      }
       if (selectedRows.length == vec.length) {
         result[field.name] = vec;
       } else {
@@ -860,7 +868,7 @@ export class ChunkLayoutReader extends BaseLayoutReader {
     const resultSecondary: Record<string, Arrow.Vector[]> = {};
     for (const { name } of this.secondaryFields) resultSecondary[name] = [];
 
-    const queryRange = this.queryCoordinateRange
+    const queryRange = this.queryCoordinateRange;
 
     for (const rowIdx of selectedRows) {
       const startValue = Number(chunkStartVec.get(rowIdx) ?? 0);
@@ -868,11 +876,14 @@ export class ChunkLayoutReader extends BaseLayoutReader {
       const chunkValues = chunkValuesVec.get(
         rowIdx,
       ) as Arrow.Vector<Arrow.Float> | null;
+
+      // If we are extracting for a target range, don't bother processing this chunk
+      // if it doesn't touch the range we care about.
       if (queryRange != null) {
         const endValue = Number(chunkEndVec.get(rowIdx) ?? 0);
-        const rowSpan = {"start": startValue, "end": endValue}
+        const rowSpan = { start: startValue, end: endValue };
         if (!intervalOverlaps(rowSpan, queryRange)) {
-          continue
+          continue;
         }
       }
       if (chunkValues == null)
@@ -895,6 +906,7 @@ export class ChunkLayoutReader extends BaseLayoutReader {
         default:
           throw new Error(`Unknown chunk encoding: ${encoding}`);
       }
+
       resultMainAxis.push(decoded);
       for (let _i = 0; _i < decoded.length; _i++)
         resultIndex.append(entryIndex);
@@ -915,40 +927,36 @@ export class ChunkLayoutReader extends BaseLayoutReader {
         }
       }
     }
+
     if (resultMainAxis.length == 0) {
-      const result: ColumnMap = {}
+      const result: ColumnMap = {};
       result[indexColName] = resultIndex.finish().toVector();
-      for(let e of this.arrayIndex.entries) {
-        switch (e.dataTypeCURIE) {
-          case "MS:1000523":
-            result[e.arrayName] = Arrow.makeVector(new Float64Array([]))
-            break;
-          case "MS:1000521":
-            result[e.arrayName] = Arrow.makeVector(new Float32Array([]));
-            break;
-          case "MS:1000519":
-            result[e.arrayName] = Arrow.makeVector(new Int32Array([]));
-            break;
-          case "MS:1000522":
-            result[e.arrayName] = Arrow.makeVector(new BigInt64Array([]));
-            break;
-          case "MS:1000479":
-            result[e.arrayName] = Arrow.makeVector(new Uint8Array([]));
-            break
-          default:
-            throw new Error(`Data type ${e.dataTypeCURIE} is not implemented`)
-        }
+      for (let e of this.arrayIndex.entries) {
+        result[e.arrayName] = e.emptyArrow();
       }
-      return result
+      return result;
     }
+
     let mainAxisCombined = combineVectors(resultMainAxis);
     const result: ColumnMap = {
       [indexColName]: resultIndex.finish().toVector(),
       [mainAxisName]: mainAxisCombined,
     } as ColumnMap;
+
     for (const [name, values] of Object.entries(resultSecondary)) {
-      result[name] = combineVectors(values);
+      const vec = combineVectors(values);
+      /*
+      We have already collected an array of this name, so this must be another dimension not present
+      in this particular observation, e.g. when there are multiple intensity arrays with different units,
+      so do not overwrite the existing array.
+      */
+      if (vec.nullCount == vec.length) {
+        console.log("Skipping", name);
+        continue;
+      }
+      result[name] = vec;
     }
+
     return result;
   }
 }
@@ -981,6 +989,7 @@ export class DataArraysReader {
   get format(): BufferFormat {
     return this.metadata.format;
   }
+
   get length(): number | undefined {
     if (!this.metadata.pageKeyIndex) return 0;
     if (this.metadata.pageKeyIndex.length == 0) return 0;
@@ -1048,51 +1057,69 @@ export class DataArraysReader {
     return entries;
   }
 
-  async extractRangeFor(indexRange: {start: bigint | number, end: bigint | number} | null, coordinateRange: Span1D | null = null) {
+  async extractRangeFor(
+    indexRange: { start: bigint | number; end: bigint | number } | null,
+    coordinateRange: Span1D | null = null,
+  ) {
     let iter;
-    let endIdx = null
+    let endIdx = null;
     if (indexRange == null) {
-      iter = await this.enumerate()
+      iter = await this.enumerate();
     } else {
-      iter = await this._getRangeIter(BigInt(indexRange.start), BigInt(indexRange.end))
+      iter = await this._getRangeIter(
+        BigInt(indexRange.start),
+        BigInt(indexRange.end),
+      );
       endIdx = BigInt(indexRange.end);
     }
-    if (iter == null) return []
-    const entries = []
+    if (iter == null) return [];
+    const entries = [];
     if (coordinateRange) {
-      iter.setQueryCoordinateRange(coordinateRange)
+      iter.setQueryCoordinateRange(coordinateRange);
     }
-    const sortArr = this.arrayIndex.entries.reduce((last, e) => e.sortingRank != null && e.sortingRank < (last.sortingRank || Infinity) ? e : last)
+    const sortArr = this.arrayIndex.entries.reduce((last, e) =>
+      e.sortingRank != null && e.sortingRank < (last.sortingRank || Infinity)
+        ? e
+        : last,
+    );
     for await (const [index, entry] of iter) {
       if (endIdx != null && endIdx < index) break;
       if (coordinateRange) {
-        const coordinatesOf = (entry as Arrow.Table).getChild(sortArr.arrayName);
-        if (!coordinatesOf) throw new Error(`Could not find ${sortArr} in ${entry.schema}`)
-        const idxRange = betweenSorted(coordinatesOf, coordinateRange.start, coordinateRange.end)
+        const coordinatesOf = (entry as Arrow.Table).getChild(
+          sortArr.arrayName,
+        );
+        if (!coordinatesOf)
+          throw new Error(`Could not find ${sortArr} in ${entry.schema}`);
+        const idxRange = betweenSorted(
+          coordinatesOf,
+          coordinateRange.start,
+          coordinateRange.end,
+        );
         if (idxRange) {
-          entries.push([
+          entries.push({
             index,
-            packTableIntoDataArrays((entry as Arrow.Table).slice(idxRange[0], idxRange[1]))
-          ])
+            dataArrays: packTableIntoDataArrays(
+              (entry as Arrow.Table).slice(idxRange[0], idxRange[1]),
+            ),
+          });
         }
       } else {
-        entries.push([
+        entries.push({
           index,
-          packTableIntoDataArrays(entry as Arrow.Table)
-        ])
+          dataArrays: packTableIntoDataArrays(entry as Arrow.Table),
+        });
       }
-
     }
-    return entries
+    return entries;
   }
 
   async _getRangeIter(start: bigint, end: bigint) {
     const rowGroupsStart = this.rowGroupIndex.keysFor(start);
     const rowGroupsEnd = this.rowGroupIndex.keysFor(end);
     let i = rowGroupsStart[0];
-    let skipped = 0
-    for(let j = 0; j < i; j++) {
-      skipped += this.handle.metadata().rowGroup(j).numRows()
+    let skipped = 0;
+    for (let j = 0; j < i; j++) {
+      skipped += this.handle.metadata().rowGroup(j).numRows();
     }
     const lastRgIdx = rowGroupsEnd[rowGroupsEnd.length - 1];
     const rowGroupsTotal: bigint[] = [];
@@ -1187,7 +1214,7 @@ export class DataStreamIterator
   }
 
   setQueryCoordinateRange(query: Span1D | null) {
-    this.layoutReader.queryCoordinateRange = query
+    this.layoutReader.queryCoordinateRange = query;
   }
 
   private async readNextBatch(updateIndex: boolean = false) {

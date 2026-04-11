@@ -17,3 +17,7 @@
   border-top: 1px solid gray;
   border-collapse: collapse;
 }
+
+#main-tabs .Mui-selected {
+  color: white;
+}

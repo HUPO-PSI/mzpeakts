@@ -1,10 +1,35 @@
-import { ZipStorage } from "./store"
-import { SpectrumMetadata, ChromatogramMetadata, FileMetadata } from './metadata';
+import * as Arrow from "apache-arrow";
+import { ZipStorage } from "./store";
+import {
+  SpectrumMetadata,
+  ChromatogramMetadata,
+  FileMetadata,
+} from "./metadata";
 import { HttpRangeReader, BlobReader } from "@zip.js/zip.js";
-import { DataArraysReader, packTableIntoDataArrays, packTableIntoPeaks } from "./data";
+import {
+  DataArraysReader,
+  packTableIntoDataArrays,
+  packTableIntoPeaks,
+} from "./data";
 import { BufferContext } from "./array_index";
 import { PointLike } from "./record";
+import { Span1D } from "./utils";
+import { bigIntToNumber } from "apache-arrow/util/bigint";
+import { DataArrays } from './data';
 
+export interface XICPoint {
+  index: bigint,
+  time: number | null,
+  dataArrays: DataArrays
+}
+
+export interface XIC {
+  points: XICPoint[];
+  target: {
+    timeRange: Span1D | null;
+    mzRange: Span1D | null;
+  };
+};
 
 export class MZPeakReader<T> {
   store: ZipStorage<T>;
@@ -16,16 +41,16 @@ export class MZPeakReader<T> {
   _spectrumPeaksReader: DataArraysReader | null = null;
   _chromatogramDataReader: DataArraysReader | null = null;
   _wavelengthSpectrumDataReader: DataArraysReader | null = null;
-  _fileMetadata: FileMetadata | undefined = undefined
+  _fileMetadata: FileMetadata | undefined = undefined;
 
   constructor(store: ZipStorage<T>) {
     this.store = store;
   }
 
   get fileMetadata() {
-    if (this._fileMetadata != undefined) return this._fileMetadata
-    this._fileMetadata = this.spectrumMetadata?.fileMetadata()
-    return this._fileMetadata
+    if (this._fileMetadata != undefined) return this._fileMetadata;
+    this._fileMetadata = this.spectrumMetadata?.fileMetadata();
+    return this._fileMetadata;
   }
 
   static async fromStore<T>(store: ZipStorage<T>) {
@@ -152,9 +177,54 @@ export class MZPeakReader<T> {
       const peakData = await peakHandle?.get(index);
       if (peakData && peakData.numRows > 0) {
         const peaks = packTableIntoPeaks(peakData) as any as PointLike[];
-        meta.centroids = peaks
+        meta.centroids = peaks;
       }
       return meta;
+    }
+  }
+
+  async extractXIC(
+    timeRange: Span1D | null,
+    mzRange: Span1D | null = null,
+  ): Promise<XIC | null> {
+    if (!this.spectrumMetadata) return null;
+    let indexRange = null;
+    if (timeRange)
+      indexRange = this.spectrumMetadata?.timeRangeToIndices(
+        timeRange.start,
+        timeRange.end,
+      );
+    const reader = await this.spectrumData();
+    if (!reader) return null;
+    const points = (await reader.extractRangeFor(
+      indexRange,
+      mzRange,
+    )) as XICPoint[];
+    const timeArray = this.spectrumMetadata.spectra?.getChild(
+      "time",
+    ) as Arrow.Vector<Arrow.Float64> | null;
+    if (timeArray) {
+      return {
+        points: points.map((entry: XICPoint) => {
+            entry["time"] = timeArray.at(bigIntToNumber(entry.index));
+            return entry;
+          }),
+        target: {
+          timeRange,
+          mzRange
+        }
+      };
+    } else {
+      return {
+        points: points.map((entry: XICPoint) => {
+          entry["time"] = null
+          return entry;
+        }),
+        target: {
+          timeRange,
+          mzRange,
+        },
+      };
     }
   }
 
@@ -210,7 +280,7 @@ export class MZPeakReader<T> {
 
   async *[Symbol.asyncIterator]() {
     for await (let value of this.enumerateSpectra()) {
-      yield value
+      yield value;
     }
   }
 }
