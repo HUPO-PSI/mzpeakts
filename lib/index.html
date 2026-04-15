@@ -5,15 +5,17 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Document</title>
     <script type="module">
-        import * as MZPeak from "./src";
+        import * as mzpeakts from "./src";
         import * as arrow from "apache-arrow"
         import * as arrowFFI from "arrow-js-ffi";
         window.arrow = arrow
         window.arrowFFI = arrowFFI
-        window.MZPeak = MZPeak;
+        window.mzpeakts = mzpeakts;
 
-        window.reader = await MZPeak.MZPeakReader.fromUrl("/static/small.chunked.mzpeak")
-        window.dataReader = window.reader.spectrumData()
+        //window.reader = await MZPeak.MzPeakReader.fromUrl("/static/small.chunked.mzpeak")
+        window.reader = await mzpeakts.MzPeakReader.fromUrl("/static/20240224_L3.2.mzpeak")
+        window.dataReader = await window.reader.spectrumData()
+        window.cDataReader = await window.reader.chromatogramData()
     </script>
 </head>
 <body>
@@ -24,11 +26,13 @@
         fileObj.addEventListener("change", async function(e) {
             console.log(this.files)
             if (this.files.length) {
-                window.reader = await MZPeak.MZPeakReader.fromBlob(this.files[0])
+                window.reader = await mzpeakts.MzPeakReader.fromBlob(this.files[0])
                 window.dataReader = await window.reader.spectrumData()
+                window.cDataReader = await window.reader.chromatogramData()
             } else {
                 window.reader = null
                 window.dataReader = null
+                window.cDataReader = null
             }
         })
     </script>

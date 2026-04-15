@@ -31,7 +31,7 @@ export interface XIC {
   };
 };
 
-export class MZPeakReader<T> {
+export class MzPeakReader<T> {
   store: ZipStorage<T>;
   spectrumMetadata: SpectrumMetadata | null = null;
   chromatogramMetadata: ChromatogramMetadata | null = null;
@@ -60,13 +60,13 @@ export class MZPeakReader<T> {
   }
 
   static async fromUrl(url: string | URL) {
-    return await MZPeakReader.fromStore(
+    return await MzPeakReader.fromStore(
       new ZipStorage(new HttpRangeReader(url)),
     );
   }
 
   static async fromBlob(blob: Blob) {
-    return await MZPeakReader.fromStore(new ZipStorage(new BlobReader(blob)));
+    return await MzPeakReader.fromStore(new ZipStorage(new BlobReader(blob)));
   }
 
   async init() {

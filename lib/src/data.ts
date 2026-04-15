@@ -224,7 +224,6 @@ export function findMaskedPairs(
   maskedVector: Arrow.Vector,
 ): [number, number][] {
   let nullHere: number[] = [];
-  // const raw = maskedVector.toArray()
   for (let i = 0; i < maskedVector.length; i++) {
     if (maskedVector.get(i) == null) nullHere.push(i);
   }
@@ -291,10 +290,11 @@ export function interpolateNulls(
   const pairIndices = findMaskedPairs(values);
   const chunks = [];
   let k = 0;
-
+  console.log(pairIndices[0], pairIndices[pairIndices.length - 1])
   for (let [start, end] of pairIndices) {
     const chunk = values.slice(start, end);
     const n = chunk.length;
+    console.log(start, end, "|", n, end - start, chunk.nullCount);
     const nHasReal = n - chunk.nullCount;
     if (nHasReal == 1) {
       if (n == 2) {
@@ -327,6 +327,7 @@ export function interpolateNulls(
     k += chunk.length;
     chunks.push(chunk);
   }
+  console.log(k)
   if (chunks.map((x) => x.length).reduce((a, b) => a + b) != values.length) {
     throw new Error(
       `Information was lost, total size of chunks does not match input size: ${chunks.map((x) => x.length).reduce((a, b) => a + b)} != ${values.length}`,

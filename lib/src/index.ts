@@ -33,7 +33,7 @@ export {
 } from "./data";
 export * as arrayIndex from "./array_index";
 export { BufferContext } from "./array_index";
-export { MZPeakReader } from "./reader";
+export { MzPeakReader as MzPeakReader } from "./reader";
 export type { XIC, XICPoint } from "./reader";
 export * as utils from "./utils";
 export * as data from "./data";

@@ -244,10 +244,10 @@ export class MSCanvasBase<T extends PointLike> {
   }
 
   maxCoordinate() {
-
     const maxMz = this.maxXDim();
     const upperBound = this.scanRange?.upperBound || Infinity;
     const padded = Math.min(maxMz * 1.1, maxMz + 50.0);
+    console.log(maxMz, padded, upperBound)
     return Math.min(padded, upperBound);
   }
 
@@ -319,7 +319,6 @@ export class MSCanvasBase<T extends PointLike> {
       .append("g")
       .attr("transform", `translate(0, ${this.height})`)
       .call(d3.axisBottom(this.xScale).tickFormat((val, _) => {
-        console.log(val)
         return val.toString()
       }));
 
@@ -495,6 +494,7 @@ export class MSCanvasBase<T extends PointLike> {
     );
 
     this.extentCoordinateInterval = [minCoordinate, maxCoordinate];
+    console.log(this.extentCoordinateInterval)
     this.xScale.domain([minCoordinate, maxCoordinate]);
     this.yScale.domain([0, maxIntensity * 1.05]);
     this.xAxis

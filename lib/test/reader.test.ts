@@ -1,11 +1,11 @@
 import { expect, test, beforeAll } from "vitest";
 import * as fs from "fs";
-import { MZPeakReader } from "../src/reader";
+import { MzPeakReader } from "../src/reader";
 import { bigIntToNumber } from 'apache-arrow/util/bigint';
 
 test("test launches", async () => {
   const blob = await fs.openAsBlob("static/small.mzpeak");
-  const reader = await MZPeakReader.fromBlob(blob);
+  const reader = await MzPeakReader.fromBlob(blob);
   expect.assert(reader.length == 48);
 });
 
@@ -62,7 +62,7 @@ const INDEX_SIZE_MSLEVEL = [
 
 test("chunked layout reader", async () => {
   const blob = await fs.openAsBlob("static/small.chunked.mzpeak");
-  const reader = await MZPeakReader.fromBlob(blob);
+  const reader = await MzPeakReader.fromBlob(blob);
   for (let [index, size, msLevel] of INDEX_SIZE_MSLEVEL) {
     const response = await reader.get(index);
     expect.assert(response != null);
@@ -91,7 +91,7 @@ test("chunked layout reader", async () => {
 
 test("point layout reader", async () => {
   const blob = await fs.openAsBlob("static/small.mzpeak");
-  const reader = await MZPeakReader.fromBlob(blob);
+  const reader = await MzPeakReader.fromBlob(blob);
   for (let [index, size, msLevel] of INDEX_SIZE_MSLEVEL) {
     const response = await reader.get(index);
     expect.assert(response != null);
@@ -111,7 +111,7 @@ test("point layout reader", async () => {
 
 test("iterator behavior", async () => {
   const blob = await fs.openAsBlob("static/small.mzpeak");
-  const reader = await MZPeakReader.fromBlob(blob);
+  const reader = await MzPeakReader.fromBlob(blob);
   for await (let response of reader.enumerateSpectra()) {
     const [index, size, msLevel] = INDEX_SIZE_MSLEVEL[bigIntToNumber(response.index)]
     expect.assert(response != null);
@@ -134,7 +134,7 @@ test("iterator behavior", async () => {
 
 test("read remote", async () => {
   try {
-    const reader = await MZPeakReader.fromUrl("http://localhost:8030/small.mzpeak")
+    const reader = await MzPeakReader.fromUrl("http://localhost:8030/small.mzpeak")
     expect.assert(reader.length == 48);
   } catch(err) {
     expect.assert((err as Error).message.match(/fetch failed/g))

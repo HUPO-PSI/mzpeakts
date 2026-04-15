@@ -1,5 +1,5 @@
 import { forwardRef, Fragment, } from "react";
-import { ChromatogramMetadata, MZPeakReader, Chromatogram } from "mzpeakts";
+import { ChromatogramMetadata, MzPeakReader, Chromatogram } from "mzpeakts";
 import "./SpectrumList.css";
 
 import {
@@ -234,7 +234,7 @@ function VirtualizedTable() {
         <TableVirtuoso
           totalCount={mzReader ? mzReader.chromatogramMetadata?.length : 0}
           itemContent={(index: number) => {
-            const reader = mzReader as MZPeakReader<any>;
+            const reader = mzReader as MzPeakReader<any>;
             const metaReader = reader.chromatogramMetadata;
             if (metaReader == null)
               throw new Error("Cannot handle missing chromatograms");

@@ -389,6 +389,10 @@ export class ChromatogramCanvasState {
           undefined,
           [],
           this.chromatogramData?.id,
+          {
+            lowerBound: 0,
+            upperBound: 2000.0
+          },
         );
       } else {
         this.clearCanvas();

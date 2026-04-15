@@ -2,7 +2,7 @@ import { useState, useEffect, Fragment } from 'react'
 import './App.css'
 
 import { DataFileChooser } from "./DataFileChooser";
-import { MZPeakReader } from "mzpeakts";
+import { MzPeakReader } from "mzpeakts";
 import { SpectrumList } from './SpectrumList';
 import { ChromatogramCanvasComponent, SpectrumCanvasComponent } from "./canvas/component"
 import {
@@ -132,7 +132,7 @@ export function Frame() {
   useEffect(() => {
     if (dataFile) {
       console.log("Opening", dataFile);
-      MZPeakReader.fromBlob(dataFile).then((value) => {
+      MzPeakReader.fromBlob(dataFile).then((value) => {
         viewStateDispatch({
           type: ViewerActionType.MZReader,
           value,
@@ -149,7 +149,7 @@ export function Frame() {
   useEffect(() => {
     if (dataUrl) {
       viewStateDispatch({type: ViewerActionType.StatusMessage, text: `Loading from URL: ${dataUrl}`})
-      MZPeakReader.fromUrl(dataUrl).then((value) => {
+      MzPeakReader.fromUrl(dataUrl).then((value) => {
         viewStateDispatch({
           type: ViewerActionType.StatusMessage,
           text: null,
@@ -167,6 +167,7 @@ export function Frame() {
   }, [dataUrl]);
 
   const [xicSpec, setXICSpec] = useState<XICTarget | null>(null)
+  const [tabIndex, setTabIndex] = useState(0);
 
   useEffect(() => {
     if (xicSpec) {
@@ -193,13 +194,14 @@ export function Frame() {
               type: ViewerActionType.StatusMessage,
               text: null
             });
+            setTabIndex(1)
           }
         })
         setXICSpec(null)
     }
   })
 
-  const [tabIndex, setTabIndex] = useState(0)
+
 
   return (
     <>

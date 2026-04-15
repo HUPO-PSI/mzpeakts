@@ -110,30 +110,30 @@ export const columnDefs: Column[] = [
   //     spectrum.getParamByAccession("MS:1000505")?.value,
   //   eager: false,
   // },
-  {
-    name: "MS Level",
-    numeric: true,
-    getter: (spectrum: Spectrum) => spectrum.msLevel,
-    eager: true,
-  },
-  {
-    name: "Prec. m/z",
-    numeric: true,
-    format: (x: number) => x.toFixed(3),
-    getter: (spectrum: Spectrum) => {
-      return spectrum.selectedIons.length ? spectrum.selectedIons[0].mz : null;
-    },
-    eager: true,
-  },
-  {
-    name: "Prec. z",
-    numeric: true,
-    getter: (spectrum: Spectrum) =>
-      spectrum.selectedIons.length
-        ? spectrum.selectedIons[0].chargeState
-        : null,
-    eager: true,
-  },
+  // {
+  //   name: "MS Level",
+  //   numeric: true,
+  //   getter: (spectrum: Spectrum) => spectrum.msLevel,
+  //   eager: true,
+  // },
+  // {
+  //   name: "Prec. m/z",
+  //   numeric: true,
+  //   format: (x: number) => x.toFixed(3),
+  //   getter: (spectrum: Spectrum) => {
+  //     return spectrum.selectedIons.length ? spectrum.selectedIons[0].mz : null;
+  //   },
+  //   eager: true,
+  // },
+  // {
+  //   name: "Prec. z",
+  //   numeric: true,
+  //   getter: (spectrum: Spectrum) =>
+  //     spectrum.selectedIons.length
+  //       ? spectrum.selectedIons[0].chargeState
+  //       : null,
+  //   eager: true,
+  // },
 ];
 
 export function fixedHeaderContent() {
@@ -168,7 +168,6 @@ export function rowContentBasic(
 ) {
   const row = handle.get(index)
   const isCurrentSpectrum = row.id == currentSpectrumID;
-  const selIon = row.selectedIons.length ? row.selectedIons[0] : null;
   const style: React.CSSProperties = { padding: "3px", textAlign: "center" };
   const className = isCurrentSpectrum ? "current-spectrum" : "";
   return (
@@ -190,7 +189,7 @@ export function rowContentBasic(
       <TableCell key="time" style={style} className={className}>
         {row.time}
       </TableCell>
-      <TableCell key="ms-level" style={style} className={className}>
+      {/* <TableCell key="ms-level" style={style} className={className}>
         {row.msLevel}
       </TableCell>
       <TableCell key="precursor-mz" style={style} className={className}>
@@ -198,7 +197,7 @@ export function rowContentBasic(
       </TableCell>
       <TableCell key="precursor-z" style={style} className={className}>
         {selIon?.chargeState ?? ""}
-      </TableCell>
+      </TableCell> */}
     </Fragment>
   );
 }
@@ -227,7 +226,7 @@ export function VirtualizedTable() {
   const mzReader = viewerState.mzReader;
   const onClick = async (index: number) => {
     if (mzReader) {
-      const spectrum = await mzReader.getSpectrum(index);
+      const spectrum = await mzReader.getWavelengthSpectrum(index);
       viewerDispatch({
         type: ViewerActionType.CurrentSpectrumIdx,
         value: index,
@@ -253,7 +252,7 @@ export function VirtualizedTable() {
           totalCount={mzReader ? mzReader.length : 0}
           itemContent={(index: number) => {
             const reader = mzReader as MzPeakReader<any>;
-            const metaReader = reader.spectrumMetadata;
+            const metaReader = reader.wavelengthMetadata;
             if (metaReader == null)
               throw new Error("Cannot handle missing spectra");
 

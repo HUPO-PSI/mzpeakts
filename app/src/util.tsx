@@ -1,4 +1,4 @@
-import { MZPeakReader, Spectrum, Chromatogram, XIC } from "mzpeakts";
+import { MzPeakReader, Spectrum, Chromatogram, XIC } from "mzpeakts";
 
 import {
   LayerBase,
@@ -145,7 +145,7 @@ export class ChromatogramData {
     const intensities = new Float32Array(this.rawExtraction.points.length);
     for(let i = 0; i < this.rawExtraction.points.length; i++) {
       const e = this.rawExtraction.points[i];
-      const total = (e.dataArrays["intensity array"] as Float32Array).reduce((a, b) => a + b);
+      const total = (e.dataArrays["intensity array"] as Float32Array).reduce((a, b) => a + b, 0);
       intensities[i] = total
       times[i] = e.time != null ? e.time : Number(e.index)
     }
@@ -167,14 +167,14 @@ export class SpectrumViewerState {
   spectrumData: SpectrumData | null;
   chromatogramData: ChromatogramData | null;
   processingParams: ProcessingParams | null;
-  mzReader: MZPeakReader<any> | null;
+  mzReader: MzPeakReader<any> | null;
   currentSpectrumIdx: number | null;
   statusMessage: StatusMessage;
 
   constructor(
     spectrumData: SpectrumData | null,
     processingParams: ProcessingParams,
-    mzReader: MZPeakReader<any> | null,
+    mzReader: MzPeakReader<any> | null,
     currentSpectrumIdx: number | null,
     statusMessage: StatusMessage = { text: null, icon: null },
     chromatogramData: ChromatogramData | null = null,
@@ -262,7 +262,7 @@ export enum ViewerActionType {
 }
 
 export type SpectrumViewerAction =
-  | { type: ViewerActionType.MZReader; value: MZPeakReader<any> | null }
+  | { type: ViewerActionType.MZReader; value: MzPeakReader<any> | null }
   | { type: ViewerActionType.ProcessingParams; value: ProcessingParams | null }
   | {
       type: ViewerActionType.CurrentSpectrumIdx;

@@ -164,8 +164,8 @@ export class SelectedIon extends ParamDescribed {
     precursorIndex: bigint,
     mz?: number,
     intensity?: number,
-    chargeState?: number,
-    ionMobility?: number,
+    chargeState?: number|null,
+    ionMobility?: number|null,
     parameters?: Param[],
     meta?: any,
   ) {
@@ -182,12 +182,19 @@ export class SelectedIon extends ParamDescribed {
 
   static fromRecord(record: any) {
     const parameters = record.parameters.map(Param.fromArrow);
+    let charge: number | null;
+    if (record["MS_1000041_charge_state"]) {
+      charge = Number(record["MS_1000041_charge_state"]);
+    }
+    else {
+      charge = null
+    }
     return new SelectedIon(
       record.source_index,
       record.precursor_index,
       record["MS_1000744_selected_ion_mz_unit_MS_1000040"],
       record["MS_1000042_intensity_unit_MS_1000131"],
-      record["MS_1000041_charge_state"],
+      charge,
       record["ion_mobility"],
       parameters,
       record,
