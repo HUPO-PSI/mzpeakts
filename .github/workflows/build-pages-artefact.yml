@@ -22,9 +22,7 @@ jobs:
       - name: Install dependencies
         run: |
           echo `pwd`
-          ls -l
-          npm install ../lib/
-          npm install .
+          npm install --include=dev .
 
       - name: Build Demo
         run: npm run build
