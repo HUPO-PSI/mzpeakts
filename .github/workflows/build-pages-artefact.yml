@@ -23,8 +23,8 @@ jobs:
         run: |
           echo `pwd`
           ls -l
-          npm install --install-links ../lib/
-          npm install --install-links .
+          npm install ../lib/
+          npm install .
 
       - name: Build Demo
         run: npm run build
