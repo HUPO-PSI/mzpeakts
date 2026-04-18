@@ -19,11 +19,11 @@ jobs:
         with:
           node-version: '22'
           cache: 'npm'
-          cache-dependency-path: "*/package-lock.json"
+      - name: Install dependencies
+        run: npm install --dev
 
-      - run: npm ci
-
-      - run: npm run build
+      - name: Build Demo
+        run: npm run build
 
       - name: Upload demo application single file application
         uses: actions/upload-artifact@v7
