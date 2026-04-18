@@ -290,11 +290,9 @@ export function interpolateNulls(
   const pairIndices = findMaskedPairs(values);
   const chunks = [];
   let k = 0;
-  console.log(pairIndices[0], pairIndices[pairIndices.length - 1])
   for (let [start, end] of pairIndices) {
     const chunk = values.slice(start, end);
     const n = chunk.length;
-    console.log(start, end, "|", n, end - start, chunk.nullCount);
     const nHasReal = n - chunk.nullCount;
     if (nHasReal == 1) {
       if (n == 2) {
@@ -327,7 +325,6 @@ export function interpolateNulls(
     k += chunk.length;
     chunks.push(chunk);
   }
-  console.log(k)
   if (chunks.map((x) => x.length).reduce((a, b) => a + b) != values.length) {
     throw new Error(
       `Information was lost, total size of chunks does not match input size: ${chunks.map((x) => x.length).reduce((a, b) => a + b)} != ${values.length}`,
@@ -952,7 +949,6 @@ export class ChunkLayoutReader extends BaseLayoutReader {
       so do not overwrite the existing array.
       */
       if (vec.nullCount == vec.length) {
-        console.log("Skipping", name);
         continue;
       }
       result[name] = vec;
