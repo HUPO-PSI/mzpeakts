@@ -18,9 +18,12 @@ jobs:
       - uses: actions/setup-node@v6
         with:
           node-version: '22'
-          cache: 'npm'
+          # cache: 'npm'
       - name: Install dependencies
-        run: npm install --dev
+        run: |
+          echo `pwd`
+          ls -l
+          npm install --dev
 
       - name: Build Demo
         run: npm run build
