@@ -25,7 +25,6 @@ jobs:
           npm install ../lib/vendor/parquet-wasm/pkg/
           npm install --install-links ../lib
           npm install --install-links --include=dev .
-          npm ls -a
 
       - name: Build Demo
         run: npm run build
