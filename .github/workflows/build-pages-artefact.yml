@@ -22,7 +22,10 @@ jobs:
       - name: Install dependencies
         run: |
           echo `pwd`
-          npm install --include=dev .
+          npm install ../lib/vendor/parquet-wasm/pkg/
+          npm install --install-links ../lib
+          npm install --install-links --include=dev .
+          npm ls -a
 
       - name: Build Demo
         run: npm run build
