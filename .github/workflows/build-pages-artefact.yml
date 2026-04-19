@@ -33,9 +33,7 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: github-pages
-          path: |
-            app/dist/app/
-            app/static/
+          path: app/dist/app/index.html
 
   deploy-pages:
     needs: build-demo
