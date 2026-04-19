@@ -32,7 +32,7 @@ jobs:
       - name: Upload demo application single file application
         uses: actions/upload-artifact@v7
         with:
-          name: output artefacts
+          name: github-pages
           path: |
             app/dist/app/
             app/static/
