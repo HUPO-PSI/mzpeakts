@@ -57,21 +57,30 @@ export class FileIndex {
   }
 }
 
+/**
+ * Low-level mzPeak storage that is backed by an uncompressed `ZIP` archive that is either local
+ * or remote to the runtime.
+ */
 export class ZipStorage<T> {
+  /** The raw {@linkcode zip.Reader} that backs this archive */
   reader: zip.Reader<T>;
+  /** The `ZIP` reader on top of {@link reader} */
   archive: zip.ZipReader<T>;
+  /** mzPeak archive metadata describing the standardized files */
   fileIndex: FileIndex;
+  /** Raw `ZIP` metadata entries */
   entries: zip.Entry[];
+  /** Whether the {@linkcode init} method has been called. */
   initialized: boolean;
 
   /**
    * The raw constructor for `ZipStorage` that works directly on `zip.js`'s `Reader` base type.
    *
-   * Prefer `fromUrl` or `fromBlob` for most cases as they automatically call `init` as well.
+   * Prefer {@linkcode `fromUrl`} or {@linkcode `fromBlob`} for most cases as they automatically call `init` as well.
    *
    * @param reader The underlying ZIP reader
-   * @see ZipStorage.fromUrl - For initializing from URLs
-   * @see ZipStorage.fromBlob - For initializing from BLOBs
+   * @see {@linkcode ZipStorage.fromUrl} - For initializing from URLs
+   * @see {@linkcode ZipStorage.fromBlob} - For initializing from {@linkcode Blob} or similar interface
    */
   constructor(reader: zip.Reader<T>) {
     this.reader = reader;
@@ -82,7 +91,7 @@ export class ZipStorage<T> {
   }
 
   /**
-   * Open a `RemoteBlob` for the requested member of the ZIP archive by name
+   * Open a {@linkcode RemoteBlob} for the requested member of the ZIP archive by name
    * @param {string} filename - The name of the file to open from the archive.
    * @returns {RemoteBlob<T> | undefined} If `filename` is found, then a `RemoteBlob` is returned,
    * otherwise `undefined` is returned instead.
@@ -111,8 +120,10 @@ export class ZipStorage<T> {
   }
 
   /**
-   * Create a `ZipStorage` instance from a `Blob`-like object. This works with local files (including those attached to a browser window) or
-   * anything exposing a `Blob`-like API like `slice`, `size`, `arrayBuffer`, et. al.
+   * Create a {@linkcode ZipStorage} instance from a {@linkcode Blob}-like object. This works with local files
+   * (including those attached to a browser window) or anything exposing a `Blob`-like API like `slice`, `size`,
+   * `arrayBuffer`, et. al.
+   *
    * @param {Blob | RemoteBlob} blob The `Blob`-like object to read from. This might be a `RemoteBlob` too
    * @returns {ZipStorage<zip.BlobReader>} The storage configured for loading content via `Blob.slice` calls
    */
@@ -123,14 +134,14 @@ export class ZipStorage<T> {
   }
 
   /**
-   * Open a ZIP archive member based upon its entry in `fileIndex`. This cannot open files not in the index
+   * Open a ZIP archive member based upon its entry in {@linkcode fileIndex}. This cannot open files not in the index
    * and should not be used to open proprietary files listed in the index directly.
-   * @param entityType The `EntityType` to look up in the `fileIndex`
-   * @param dataKind The `DataKind` to look up in the `fileIndex`
+   * @param entityType The {@linkcode EntityType} to look up in the {@linkcode fileIndex}
+   * @param dataKind The {@linkcode DataKind} to look up in the {@linkcode fileIndex}
    * @returns {RemoteBlob<T> | undefined} If a matching entry is found, then a `RemoteBlob` is returned,
    * otherwise `undefined` is returned instead.
    *
-   * @see open
+   * @see {@linkcode ZipStorage.open}
    */
   async openFromIndex(
     entityType: EntityType,
@@ -232,7 +243,7 @@ export class ZipStorage<T> {
   }
 }
 
-export async function readZipHeaderSize<T>(blob: RemoteBlob<T>) {
+async function readZipHeaderSize<T>(blob: RemoteBlob<T>) {
   const arrayBuffer = await blob.slice(0, 30).arrayBuffer();
   const view = new DataView(arrayBuffer);
   let offset = 30;
@@ -241,11 +252,21 @@ export async function readZipHeaderSize<T>(blob: RemoteBlob<T>) {
   return offset + nameSize + extraSize;
 }
 
+/**
+ * An abstraction that mimicks the built-in {@linkcode Blob} interface but serves data
+ * using a {@linkcode zip.Reader} instance. This may refer to a byte range of a larger
+ * data store as in a `ZIP` archive.
+ */
 export class RemoteBlob<T> {
+  /** The backing data that may be local or remote */
   source: zip.Reader<T>;
+  /** A human-readable name or URL */
   name: string;
+  /** The end of the byte range that defines this data source */
   end: number;
+  /** The start of the byte range that defines this data source */
   start: number;
+  /** A MIME type, not required, part of the {@linkcode Blob} interface */
   type: string | undefined;
 
   static async fromEntry<T extends zip.Initializable & zip.ReadableReader>(
@@ -278,6 +299,12 @@ export class RemoteBlob<T> {
     this.type = type;
   }
 
+  /**
+   * Create a new {@linkcode RemoteBlob} from  a slice of this object's byte range.
+   *
+   * The new instance shares this instance's {@linkcode source}.
+   *
+   * @see {@linkcode Blob.slice} */
   slice(
     start: number | undefined = undefined,
     end: number | undefined = undefined,
@@ -303,11 +330,12 @@ export class RemoteBlob<T> {
     }
   }
 
+  /** @see {@linkcode Blob.size} */
   get size() {
     return this.end - this.start;
   }
 
-  async _read(): Promise<Uint8Array> {
+  private async _read(): Promise<Uint8Array> {
     const buf = await this.source.readUint8Array(
       this.start,
       this.end - this.start,
@@ -315,14 +343,29 @@ export class RemoteBlob<T> {
     return buf;
   }
 
+  /**
+   * Read the raw data storage of this blob
+   * @returns The raw {@linkcode ArrayBuffer} backing this blob.
+   * @see {@linkcode Blob.arrayBuffer}
+   */
   async arrayBuffer(): Promise<ArrayBuffer> {
     return (await this._read()).buffer as ArrayBuffer;
   }
 
+  /**
+   * Read the bytes of this blob
+   * @returns The data of this blob represented as {@linkcode Uint8Array}
+   * @see {@linkcode Blob.bytes}
+   */
   async bytes(): Promise<Uint8Array> {
     return this._read();
   }
 
+  /**
+   * Read the bytes of this blob interpreted as UTF-8
+   * @returns The data of this blob represented as {@linkcode string}
+   * @see {@linkcode Blob.text}
+   */
   async text(): Promise<string> {
     const buf = await this._read();
     const decoder = new TextDecoder("utf-8");

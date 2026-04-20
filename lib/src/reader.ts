@@ -12,7 +12,7 @@ import {
   packTableIntoPeaks,
 } from "./data";
 import { BufferContext } from "./array_index";
-import { PointLike } from "./record";
+import { PointLike, Spectrum } from "./record";
 import { Span1D } from "./utils";
 import { bigIntToNumber } from "apache-arrow/util/bigint";
 import { DataArrays } from './data';
@@ -31,11 +31,35 @@ export interface XIC {
   };
 };
 
-export class MzPeakReader<T> {
+/**
+ * A reader for mzPeak files.
+ *
+ * This reader eagerly loads metadata but lazily loads signal data.
+ *
+ * <attribute>a</attribute>
+ */
+export class MzPeakReader<T> implements AsyncIterable<Spectrum> {
+  /**
+   * The storage backend for the mzPeak file. This is a ZIP archive that is either
+   * available as a `Blob` local to the runtime or available over HTTP(S) range requests.
+   */
   store: ZipStorage<T>;
+  /**
+   * A reader for mass spectrum metadata that has been loaded eagerly.
+   */
   spectrumMetadata: SpectrumMetadata | null = null;
+  /** A reader for chromatogram or trace metadata that has been loaded eagerly */
   chromatogramMetadata: ChromatogramMetadata | null = null;
+  /**
+   * A reader for wavelength spectrum metadata that has been loaded eagerly.
+   */
   wavelengthMetadata: SpectrumMetadata | null = null;
+  /**
+   * Whether the initial asynchronous metadata loading done by {@linkcode init} has completed.
+   *
+   * This only necessary if {@link constructor} is called directly instead of {@linkcode fromStore},
+   * {@linkcode fromUrl}, or {@linkcode fromBlob}.
+   */
   initialized: boolean = false;
   _spectrumDataReader: DataArraysReader | null = null;
   _spectrumPeaksReader: DataArraysReader | null = null;
@@ -43,6 +67,11 @@ export class MzPeakReader<T> {
   _wavelengthSpectrumDataReader: DataArraysReader | null = null;
   _fileMetadata: FileMetadata | undefined = undefined;
 
+  /**
+   * Construct a {@linkcode MzPeakReader} from a {@linkcode ZipStorage}
+   * @param store The data storage to read from.
+   * @see {@link fromStore}, {@link fromUrl}, and {@link fromBlob}.
+   */
   constructor(store: ZipStorage<T>) {
     this.store = store;
   }
@@ -206,18 +235,18 @@ export class MzPeakReader<T> {
     if (timeArray) {
       return {
         points: points.map((entry: XICPoint) => {
-            entry["time"] = timeArray.at(bigIntToNumber(entry.index));
-            return entry;
-          }),
+          entry["time"] = timeArray.at(bigIntToNumber(entry.index));
+          return entry;
+        }),
         target: {
           timeRange,
-          mzRange
-        }
+          mzRange,
+        },
       };
     } else {
       return {
         points: points.map((entry: XICPoint) => {
-          entry["time"] = null
+          entry["time"] = null;
           return entry;
         }),
         target: {

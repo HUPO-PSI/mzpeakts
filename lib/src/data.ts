@@ -13,6 +13,7 @@ import {
 import { FloatArray, IntArray } from "apache-arrow/type";
 import { bigIntToNumber } from "apache-arrow/util/bigint";
 import { betweenSorted, intervalOverlaps, Span1D } from "./utils";
+import { decodeLinear, ACC_NUMPRESS_LINEAR, ACC_NUMPRESS_SLOF, ArrowArrayAppender as NumpressArrowAppender, decodeSlof } from "./numpress"
 
 export type DataArrays = Record<string, FloatArray | IntArray | string[]>;
 
@@ -70,8 +71,8 @@ export const NULL_ZERO_CURIE = "MS:1003902";
 
 const NO_COMPRESSION_CURIE = "MS:1000576";
 const DELTA_CURIE = "MS:1003089";
-const NUMPRESS_LINEAR_CURIE = "MS:1002312";
-const NUMPRESS_SLOF_CURIE = "MS:1002314";
+const NUMPRESS_LINEAR_CURIE = ACC_NUMPRESS_LINEAR;
+const NUMPRESS_SLOF_CURIE = ACC_NUMPRESS_SLOF;
 
 // ---- Internal helpers ----
 
@@ -85,10 +86,8 @@ async function* streamArrowBatches(
   options.rowGroups = rowGroups;
   if (columns) options.columns = columns;
   const tabStream = (await handle.stream(options)).values();
-  // const tabStream = (await handle.stream(options));
   const mem = wasmMemory();
   while (true) {
-    // for await (let batch of tabStream) {
     let batch = await tabStream.next();
     if (batch.done) break;
     let wBatch = batch.value;
@@ -848,8 +847,8 @@ export class ChunkLayoutReader extends BaseLayoutReader {
           this.mainAxisEntry = entry;
           this.chunkValuesFieldName = fieldName;
           break;
-        case BufferFormat.ChunkSecondary:
         case BufferFormat.ChunkTransform:
+        case BufferFormat.ChunkSecondary:
           this.secondaryFields.push({ name: fieldName, entry });
           break;
       }
@@ -889,7 +888,11 @@ export class ChunkLayoutReader extends BaseLayoutReader {
 
     const queryRange = this.queryCoordinateRange;
 
+    let numpressLinearCol = null
+    let numpressLinearColIdx = null
+    const visitedCols = new Set();
     for (const rowIdx of selectedRows) {
+      visitedCols.clear()
       const startValue = Number(chunkStartVec.get(rowIdx) ?? 0);
       const encoding = chunkEncodingVec.get(rowIdx) ?? "";
       const chunkValues = chunkValuesVec.get(
@@ -905,19 +908,40 @@ export class ChunkLayoutReader extends BaseLayoutReader {
           continue;
         }
       }
-      if (chunkValues == null)
-        throw new Error(
-          `Chunk values cannot be null, but ${rowIdx} with start value ${startValue} for ${entryIndex} was`,
-        );
       let decoded: Arrow.Vector<Arrow.Float>;
       switch (encoding) {
         case NO_COMPRESSION_CURIE:
+          if (chunkValues == null)
+            throw new Error(
+              `Chunk values cannot be null, but ${rowIdx} with start value ${startValue} for ${entryIndex} was`,
+            );
           decoded = decodeNoCompression(startValue, chunkValues);
           break;
         case DELTA_CURIE:
+          if (chunkValues == null)
+            throw new Error(
+              `Chunk values cannot be null, but ${rowIdx} with start value ${startValue} for ${entryIndex} was`,
+            );
           decoded = decodeDelta(startValue, chunkValues);
           break;
         case NUMPRESS_LINEAR_CURIE:
+          if (numpressLinearCol == null) {
+            const entriesOf = this.arrayIndex
+              .entriesFor(this.mainAxisEntry.arrayTypeCURIE)
+              .filter((e) => e.transform == ACC_NUMPRESS_LINEAR);
+            if (entriesOf.length == 0) throw new Error(`Numpress chunk encoding found, but could not find byte array`)
+            const entryFor = entriesOf[0]
+            numpressLinearColIdx = entryFor.schemaIndex;
+            numpressLinearCol = rootStruct.getChildAt(entryFor.schemaIndex!);
+          }
+          visitedCols.add(numpressLinearColIdx)
+          const buf = numpressLinearCol!.get(rowIdx) as Arrow.Vector<Arrow.Uint8> | null;
+          if (buf == null) throw new Error(`Numpress byte array is expected, found null`)
+          const acc = new NumpressArrowAppender();
+          decodeLinear(buf.toArray(), buf.length, acc);
+          decoded = acc.buildArrow();
+          throw new Error(`Unsupported Numpress Linear: ${encoding}`);
+          break;
         case NUMPRESS_SLOF_CURIE:
           throw new Error(
             `Numpress decoding not implemented (encoding: ${encoding})`,
@@ -931,18 +955,25 @@ export class ChunkLayoutReader extends BaseLayoutReader {
         resultIndex.append(entryIndex);
 
       for (const { name, entry } of this.secondaryFields) {
+        if (visitedCols.has(entry.schemaIndex)) continue
+        visitedCols.add(entry.schemaIndex);
         const secVec = rootStruct.getChild(name) as Arrow.Vector<
-          Arrow.List<Arrow.DataType>
-        >;
+            Arrow.List<Arrow.DataType>
+          >;
         let secValues = secVec.get(rowIdx);
         if (secValues == null) continue;
         if (entry.transform == NULL_ZERO_CURIE) {
           nullToZero(secValues);
         }
+        if (entry.arrayTypeCURIE == this.mainAxisEntry.arrayTypeCURIE) continue;
         if (entry.transform === NUMPRESS_SLOF_CURIE) {
-          throw new Error(
-            `Numpress decoding not implemented for secondary axis (transform: ${entry.transform})`,
+          const buf = new NumpressArrowAppender()
+          decodeSlof(
+            (secValues as Arrow.Vector<Arrow.Uint8>).toArray(),
+            secValues.length,
+            buf,
           );
+          resultSecondary[name].push(buf.buildArrow());
         } else {
           resultSecondary[name].push(secValues);
         }
@@ -965,6 +996,7 @@ export class ChunkLayoutReader extends BaseLayoutReader {
     } as ColumnMap;
 
     for (const [name, values] of Object.entries(resultSecondary)) {
+      if (values.length == 0) continue
       const vec = combineVectors(values);
       /*
       We have already collected an array of this name, so this must be another dimension not present

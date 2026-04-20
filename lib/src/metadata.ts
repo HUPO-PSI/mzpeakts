@@ -343,10 +343,19 @@ export class FileMetadata {
 }
 
 abstract class MetadataReaderBase {
+  /** The backing Parquet file */
   handle: ParquetFile;
+  /** Whether the {@link init} method has been called, which asynchronously loads data */
   initialized: boolean = false;
-  _iteratorHelpers: IteratorLookupTables | null = null;
+  protected _iteratorHelpers: IteratorLookupTables | null = null;
 
+  /**
+   * The basic constructor for {@link MetadataReaderBase} instances. This does not
+   * complete the initialization process. Call the asynchronous {@link init} method
+   * to finish loading data.
+   *
+   * @param handle The Parquet file this reader uses
+   */
   constructor(handle: ParquetFile) {
     this.handle = handle;
     this.initialized = false;
@@ -358,14 +367,22 @@ abstract class MetadataReaderBase {
     throw new Error("Most override");
   }
 
+  /**
+   * Asynchronously load metadata tables from Parquet file
+   */
   async init(): Promise<this> {
     throw new Error("Must override init");
   }
 
+  /** Get the number of entries of the main data sequence in this reader */
   get length(): number {
     return this.initialized && this._mainStruct ? this._mainStruct.length : 0;
   }
 
+  /**
+   * Read the Parquet file completely into memory.
+   * @returns An Arrow {@link Arrow.Table}
+   */
   protected async readTable() {
     const tab = await this.handle.read();
     const ffi = tab.intoFFI();
