@@ -12,8 +12,7 @@
         window.arrowFFI = arrowFFI
         window.mzpeakts = mzpeakts;
 
-        //window.reader = await MZPeak.MzPeakReader.fromUrl("/static/small.chunked.mzpeak")
-        window.reader = await mzpeakts.MzPeakReader.fromUrl("/static/20240224_L3.2.mzpeak")
+        window.reader = await MZPeak.MzPeakReader.fromUrl("/static/small.chunked.mzpeak")
         window.dataReader = await window.reader.spectrumData()
         window.cDataReader = await window.reader.chromatogramData()
     </script>

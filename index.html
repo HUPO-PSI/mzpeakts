@@ -3,18 +3,40 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      rel="stylesheet"
+      href="https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500;700&display=swap"
+    />
+    <link
+      rel="stylesheet"
+      href="https://fonts.googleapis.com/icon?family=Material+Icons"
+    />
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.11.1/styles/foundation.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.11.1/highlight.min.js"></script>
+    <script>hljs.highlightAll();</script>
     <title>mzPeak.ts - Reading mzPeak files in the browser</title>
     <style>
         * {
-            font-family: Arial, Helvetica, sans-serif;
+            font-family: Inter, system-ui, Avenir, Helvetica, Arial, sans-serif;
         }
         header  h1  span {
             font-size: 0.6em;
+            font-family: Inter, system-ui, Avenir, Helvetica, Arial, sans-serif;
+        }
+        header h1 {
+            font-family: monospace;
         }
         header {
-            border-bottom: 1px solid black;
+            background-color: #448ec0;
+            padding: 3px;
+            color: white;
+            padding-left: 5%;
+            padding-top: 1em;
+            margin: -1em;
         }
-        body {
+        article {
             margin-left: 5%;
             margin-right: 5%;
         }
@@ -24,9 +46,50 @@
     <header>
         <h1>mzPeak.ts <span> - Reading mzPeak files in the browser and server with JavaScript</span></h1>
     </header>
-    <section>
-        <h2>Demo</h2>
-        <a href="app.html">Try out the demo application for reading mzPeak files and visualizing their contents</a>
-    </section>
+    <article>
+        <section>
+            <h2>What is this?</h2>
+            <p>
+                This is an implementation of <a href="https://github.com/HUPO-PSI/mzPeak">mzPeak</a> that reads data in the browser
+                and over the network. It provides (relatively) fast random access over data files, and handles quick access to metadata
+                on-demand. All processing happens within the client, no backend server needed.
+            </p>
+            <p>
+                This is not a wrapper around an implementation in another language. This uses pre-existing JavaScript and WASM libraries
+                to work with ZIP, Parquet, and Arrow, with all the gory details of mzPeak implemented directly in TypeScript. This work
+                would not have been possible without:
+                <ol>
+                    <li><code>parquet-wasm</code>: <a href="https://github.com/kylebarron/parquet-wasm">https://github.com/kylebarron/parquet-wasm</a></li>
+                    <li><code>apache-arrow</code>: <a href="https://arrow.apache.org/js/current/">https://arrow.apache.org/js/current/</a></li>
+                    <li><code>zip.js</code>: <a href="https://github.com/gildas-lormeau/zip.js/">https://github.com/gildas-lormeau/zip.js/</a></li>
+                </ol>
+            </p>
+        </section>
+        <section>
+            <h2>Demo</h2>
+            <a href="app.html">Try out the demo application for reading mzPeak files and visualizing their contents</a>
+        </section>
+        <section>
+            <h2>Example files</h2>
+            <ul>
+                <li>
+                    Small, point layout: <a href="static/small.mzpeak">small.mzpeak</a>
+                </li>
+                <li>
+                    Small, chunked layout: <a href="static/small.chunked.mzpeak">small.chunked.mzpeak</a>
+                </li>
+            </ul>
+        </section>
+        <section>
+            <h2>Usage</h2>
+            <pre><code class="language-typescript">import { MzPeakReader, Spectrum } from "mzpeakts"
+
+// Use the current window's context to find the file relative to this page.
+const reader = await MzPeakReader.fromUrl("static/small.mzpeak")
+
+const spec: Spectrum = await reader.getSpectrum(0)
+console.log(spec.id, spec.index, spec.dataArrays)</code></pre>
+        </section>
+    </article>
 </body>
 </html>
