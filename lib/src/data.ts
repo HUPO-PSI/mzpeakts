@@ -107,6 +107,11 @@ async function* streamArrowBatches(
   }
 }
 
+/**
+ * This combines multiple Arrow arrays, making a deep copy instead of shallowly appending their data together
+ * @param arrays A list of Arrow arrays to combine
+ * @returns A single Arrow array containing all the values from the source arrays, but with new storage
+ */
 function combineVectors<T extends Arrow.DataType>(
   arrays: Arrow.Vector<T>[],
 ): Arrow.Vector<T> {
@@ -177,7 +182,20 @@ function decodeDelta(
   return result;
 }
 
+/**
+ * Replace all the `null` values in a numerical array, as defined by `isValid` replaced by `0`
+ * as interpreted by the data type.
+ *
+ * This is an **in-place** operation, no copying is done.
+ *
+ * If `array.nullCount == 0`, we return immediately, otherwise this does a full pass over
+ * the array.
+ *
+ * @param array The Arrow array to have its nulls converted to 0
+ * @returns The same array, modified in-place
+ */
 const nullToZero = <T extends Arrow.DataType>(array: Arrow.Vector<T>) => {
+  if (array.nullCount == 0) return array;
   for (let _i = 0; _i < array.length; _i++) {
     if (!array.isValid(_i)) {
       array.set(_i, 0);
@@ -287,6 +305,9 @@ export function interpolateNulls(
   values: Arrow.Vector<Arrow.Float>,
   model: SpacingInterpolationModel,
 ): Arrow.Vector<Arrow.Float> {
+  if (values.nullCount == 0) {
+    return values
+  }
   const pairIndices = findMaskedPairs(values);
   const chunks = [];
   let k = 0;
@@ -747,7 +768,7 @@ export class BaseLayoutReader {
         }
         if (!sizes.every((v) => v == sizes[0])) {
           throw new Error(
-            `Not all arrays are the same length: ${sizes} for ${accumulated}`,
+            `Not all arrays are the same length: ${sizes} for ${Object.keys(accumulated)}`,
           );
         }
         rowCountRead += batchSize;
@@ -904,7 +925,7 @@ export class ChunkLayoutReader extends BaseLayoutReader {
         default:
           throw new Error(`Unknown chunk encoding: ${encoding}`);
       }
-
+      decoded = this.handleTransforms(this.mainAxisEntry, entryIndex, decoded);
       resultMainAxis.push(decoded);
       for (let _i = 0; _i < decoded.length; _i++)
         resultIndex.append(entryIndex);
@@ -913,9 +934,11 @@ export class ChunkLayoutReader extends BaseLayoutReader {
         const secVec = rootStruct.getChild(name) as Arrow.Vector<
           Arrow.List<Arrow.DataType>
         >;
-        const secValues = secVec.get(rowIdx);
+        let secValues = secVec.get(rowIdx);
         if (secValues == null) continue;
-
+        if (entry.transform == NULL_ZERO_CURIE) {
+          nullToZero(secValues);
+        }
         if (entry.transform === NUMPRESS_SLOF_CURIE) {
           throw new Error(
             `Numpress decoding not implemented for secondary axis (transform: ${entry.transform})`,
