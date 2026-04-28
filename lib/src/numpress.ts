@@ -4,6 +4,8 @@ TypeScript translation of MSNumpress.cs (rfellers@gmail.com / Johan Teleman)
 
 MS Numpress compression for mass spectrometry numeric arrays.
 Apache License, Version 2.0.
+
+Incomplete
 */
 
 import * as Arrow from 'apache-arrow';

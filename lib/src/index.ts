@@ -1,5 +1,4 @@
 export * as store from "./store";
-export * as parquet from "parquet-wasm";
 export {
   SpectrumMetadata,
   ChromatogramMetadata,
