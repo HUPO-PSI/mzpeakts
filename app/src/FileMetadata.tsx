@@ -12,7 +12,7 @@ import {
   InstrumentConfiguration,
   Software,
   DataProcessingMethod,
-} from "mzpeakts/src/metadata";
+} from "mzpeakts";
 
 
 function NotOpenedBody() {

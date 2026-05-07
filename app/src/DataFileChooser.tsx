@@ -14,10 +14,10 @@ import LinkIcon from "@mui/icons-material/Link";
 import CheckCircleOutlineIcon from "@mui/icons-material/CheckCircleOutline";
 import ErrorOutlineIcon from "@mui/icons-material/ErrorOutline";
 import ErrorIcon from "@mui/icons-material/Error";
-import { store } from "mzpeakts";
+import { ZipStorage } from "mzpeakts";
+
 
 import { useSpectrumViewerDispatch, ViewerActionType } from "./util";
-import { ZipStorage } from "mzpeakts/src/store";
 
 type UrlValidationState =
   | { status: "idle" }
@@ -47,7 +47,7 @@ function RemoteUrlModal({ onLoad }: RemoteUrlModalProps) {
   const validateUrl = async (url: string) => {
     const generation = ++validationGeneration.current;
     try {
-      await store.ZipStorage.fromUrl(url);
+      await ZipStorage.fromUrl(url);
       if (generation === validationGeneration.current) {
         setValidation({ status: "valid" });
       }
@@ -173,7 +173,7 @@ export function DataFileChooser({
         type: ViewerActionType.StatusMessage,
       });
       try {
-        const store = (await ZipStorage.fromBlob(target.files[0]))
+        const store = await ZipStorage.fromBlob(target.files[0]);
         if (store.initialized) {
           dispatch({
             text: null,

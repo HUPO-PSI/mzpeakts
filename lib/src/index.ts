@@ -1,4 +1,11 @@
-export * as store from "./store";
+export {
+  DataKind,
+  EntityType,
+  FileIndex,
+  FileIndexEntry,
+  RemoteBlob,
+  ZipStorage
+} from "./store";
 export {
   SpectrumMetadata,
   ChromatogramMetadata,
@@ -28,11 +35,13 @@ export {
   DataArraysReaderMeta,
   RangeIndex,
   GroupTagBounds,
-  interpolateNulls,
+  SpacingInterpolationModel,
+  DataStreamIterator,
+  ChunkLayoutReader,
+  PointLayoutReader,
 } from "./data";
-export * as arrayIndex from "./array_index";
-export { BufferContext } from "./array_index";
-export { MzPeakReader as MzPeakReader } from "./reader";
+export type { DataArrays } from "./data";
+export { ArrayIndex, ArrayIndexEntry, BufferContext, BufferFormat, BufferPriority } from "./array_index";
+export { MzPeakReader } from "./reader";
 export type { XIC, XICPoint } from "./reader";
-export * as utils from "./utils";
 export * as data from "./data";
