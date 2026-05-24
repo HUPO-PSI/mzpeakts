@@ -12,7 +12,7 @@ import {
 } from "./array_index";
 import { FloatArray, IntArray } from "apache-arrow/type";
 import { bigIntToNumber } from "apache-arrow/util/bigint";
-import { betweenSorted, intervalOverlaps, Span1D } from "./utils";
+import { betweenSorted, intervalOverlaps, Span1D, Span1DBigInt } from "./utils";
 import { decodeLinear, ACC_NUMPRESS_LINEAR, ACC_NUMPRESS_SLOF, ArrowArrayAppender as NumpressArrowAppender, decodeSlof } from "./numpress"
 
 export type DataArrays = Record<string, FloatArray | IntArray | string[]>;
@@ -1110,7 +1110,7 @@ export class DataArraysReader {
   }
 
   async extractRangeFor(
-    indexRange: { start: bigint | number; end: bigint | number } | null,
+    indexRange: Span1DBigInt | null,
     coordinateRange: Span1D | null = null,
   ) {
     let iter;
@@ -1196,18 +1196,19 @@ export class DataArraysReader {
       undefined,
       opts,
     );
-    const iter = new DataStreamIterator(this, batches);
+    const iter = new PeekableDataStreamIterator(new DataStreamIterator(this, batches));
     await iter.seek(start);
     return iter;
   }
 
-  enumerate(): DataStreamIterator {
-    return new DataStreamIterator(
+  enumerate(batchSize: number | undefined = 32768): PeekableDataStreamIterator {
+    const iter = new DataStreamIterator(
       this,
       streamArrowBatches(this.handle, undefined, undefined, {
-        batchSize: 32768,
+        batchSize,
       }),
     );
+    return new PeekableDataStreamIterator(iter)
   }
 
   [Symbol.asyncIterator](): AsyncIterator<[bigint, Arrow.Table | ColumnMap]> {
@@ -1307,6 +1308,14 @@ export class DataStreamIterator
     return mask.some((e) => e);
   }
 
+  private batchNextIndex() {
+    if (this.currentBatch == null) return null
+    const indexArr = this.currentBatch.getChildAt(
+      0,
+    ) as Arrow.Vector<Arrow.Uint64>;
+    return indexArr.get(0)
+  }
+
   private async extractForCurrentIndex(): Promise<Arrow.Vector<Arrow.Struct> | null> {
     if (this.currentBatch == null || this.currentIndex == null) return null;
     const indexArr = this.currentBatch.getChildAt(
@@ -1346,7 +1355,7 @@ export class DataStreamIterator
     return chunk;
   }
 
-  async moveNextAsync(doProcess: boolean = true) {
+  private async moveNextAsync(doProcess: boolean = true) {
     if (this.currentIndex == null) {
       if (!(await this.initialize())) return false;
     }
@@ -1356,29 +1365,14 @@ export class DataStreamIterator
     if (nextBatch == null) return false;
     let index = this.currentIndex;
     if (doProcess) {
-      const nextBatchUnpacked = this.layoutReader.processRows(index, nextBatch);
-
-      this._current = [index, nextBatchUnpacked];
+      const nextBatchUnpacked = this.layoutReader.processRows(index, nextBatch)
+      this._current = [index, nextBatchUnpacked]
     } else {
-      this._current = [index, nextBatch];
+      this._current = [index, nextBatch]
     }
-    ++this.currentIndex;
-    return true;
-  }
-
-  async seek(index_: bigint): Promise<boolean> {
-    const index = BigInt(index_);
-    if (!this.initialized) await this.initialize();
-    if (this.currentIndex == null) return false;
-
-    const currentIdx = this._current?.[0];
-    if (currentIdx != null && index < currentIdx) {
-      throw new Error(
-        `Cannot seek backwards. Current: ${currentIdx}, requested: ${index}`,
-      );
-    }
-    while (this.currentIndex != index) {
-      await this.moveNextAsync(false);
+    const nextIndex = this.batchNextIndex()
+    if (nextIndex != null) {
+      this.currentIndex = nextIndex
     }
     return true;
   }
@@ -1403,6 +1397,87 @@ export class DataStreamIterator
       Arrow.tableFromArrays(final as any) as Arrow.Table,
     ];
     return { done: false, value: payload };
+  }
+
+  [Symbol.asyncIterator](): AsyncIterator<[bigint, Arrow.Table | ColumnMap]> {
+    return this;
+  }
+}
+
+
+export class PeekableDataStreamIterator
+  implements
+    AsyncIterator<[bigint, Arrow.Table | ColumnMap]>,
+    AsyncIterable<[bigint, Arrow.Table | ColumnMap]>
+{
+  inner: DataStreamIterator;
+  private peeked: [bigint, Arrow.Table | ColumnMap] | null;
+
+  constructor(inner: DataStreamIterator) {
+    this.inner = inner;
+    this.peeked = null;
+  }
+
+  get currentIndex() {
+    return this.peeked ? this.peeked[0] : null
+  }
+
+  async peek() {
+    if (this.peeked == null) {
+      const { done, value } = await this.inner.next();
+      if (done) {
+        return null;
+      }
+      this.peeked = value;
+    }
+    return this.peeked;
+  }
+
+  async next() {
+    if (this.peeked) {
+      const value = this.peeked;
+      this.peeked = null;
+      await this.peek();
+      return { done: false, value };
+    }
+    return { done: true, value: undefined as any };
+  }
+
+  async seek(index_: bigint) {
+    const index = BigInt(index_);
+    let next = await this.peek();
+    if (!next) {
+      return false;
+    }
+    if (next[0] > index) {
+      throw new Error("Cannot rewind iterator");
+    }
+    if (next[0] == index) {
+      return true;
+    } else {
+      // Consume the current value as we know it does not apply
+      await this.next();
+      while (true) {
+        next = await this.peek();
+        if (!next) {
+          return false;
+        }
+        // Found it
+        if (next[0] == index) {
+          return true;
+        }
+        // The next value avilable is beyond `index`, stop searching
+        if (next[0] > index) {
+          return false;
+        }
+        // Advance to the next value, this step doesn't satisfy
+        await this.next();
+      }
+    }
+  }
+
+  setQueryCoordinateRange(query: Span1D | null) {
+    this.inner.setQueryCoordinateRange(query);
   }
 
   [Symbol.asyncIterator](): AsyncIterator<[bigint, Arrow.Table | ColumnMap]> {

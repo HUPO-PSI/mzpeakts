@@ -2,10 +2,13 @@ import * as Arrow from "apache-arrow";
 import * as ArrowFFI from "arrow-js-ffi";
 import { ParquetFile, wasmMemory } from "parquet-wasm";
 
-import { binarySearch, binarySearchAll } from "./utils";
+import { binarySearch, binarySearchAll, Span1DBigInt } from "./utils";
 import { bigIntToNumber } from "apache-arrow/util/bigint";
 import { SpacingInterpolationModel } from "./data";
 import { Spectrum, Chromatogram, ParamDescribed } from "./record";
+
+const DATA_POINT_COUNT_TERM = "MS_1003060_number_of_data_points";
+const PEAK_COUNT_TERM = "MS_1003059_number_of_peaks";
 
 export class ParamColumnSpec {
   source: string;
@@ -368,6 +371,61 @@ abstract class MetadataReaderBase {
   }
 
   /**
+   * Get the number of profile data points for this entry
+   * @returns {integer} the number of points
+   * */
+  dataPointCount(index: number): number | null;
+  /**
+   * Get the array of profile data points for this entry
+   * @returns {Arrow.Vector<Arrow.Uint64>} the array number of points
+   * */
+  dataPointCount(): null | Arrow.Vector<Arrow.Uint64>;
+  dataPointCount(
+    index: number | undefined = undefined,
+  ): number | null | Arrow.Vector<Arrow.Uint64> {
+    const main = this._mainStruct;
+    const counter: Arrow.Vector<Arrow.Uint64> | null = main?.getChild(
+      DATA_POINT_COUNT_TERM,
+    ) as any;
+    if (index == undefined) {
+      return counter;
+    }
+    if (counter == null) {
+      return null;
+    } else {
+      const val = counter.get(index);
+      return val == null ? null : bigIntToNumber(val);
+    }
+  }
+
+  /** Get the number of peaks for this entry
+   * @returns {integer} the number of peaks
+   */
+  peakCount(index: number): number | null;
+  /**
+   * Get the array of peak counts for this entry
+   * @returns {Arrow.Vector<Arrow.Uint64>} the array number of peaks
+   * */
+  peakCount(): null | Arrow.Vector<Arrow.Uint64>;
+  peakCount(
+    index: number | undefined = undefined,
+  ): number | null | Arrow.Vector<Arrow.Uint64> {
+    const main = this._mainStruct;
+    const counter: Arrow.Vector<Arrow.Uint64> | null = main?.getChild(
+      PEAK_COUNT_TERM,
+    ) as any;
+    if (index == undefined) {
+      return counter;
+    }
+    if (counter == null) {
+      return null;
+    } else {
+      const val = counter.get(index);
+      return val == null ? null : bigIntToNumber(val);
+    }
+  }
+
+  /**
    * Asynchronously load metadata tables from Parquet file
    */
   async init(): Promise<this> {
@@ -457,25 +515,28 @@ export class SpectrumMetadata extends MetadataReaderBase {
     this._selectedIons = null;
   }
 
-  timeRangeToIndices(start: number, end: number) {
-    if (!this._spectra) throw new Error("Cannot query spectrum indices, table not loaded")
+  timeRangeToIndices(start: number, end: number): Span1DBigInt | null {
+    if (!this._spectra)
+      throw new Error("Cannot query spectrum indices, table not loaded");
     const indexArr = this._spectra.getChildAt(0) as Arrow.Vector<Arrow.Uint64>;
     const timeArr = this._spectra.getChild("time") as Arrow.Vector<Arrow.Float>;
     let startedAt: number | null = null;
 
-    for(let i = 0; i < timeArr.length; i++) {
-      let val = timeArr.get(i)
-      if (val == null) continue
+    for (let i = 0; i < timeArr.length; i++) {
+      let val = timeArr.get(i);
+      if (val == null) continue;
       if (startedAt == null) {
         if (val >= start) {
-          startedAt = i
+          startedAt = i;
         }
-      }
-      else if (val > end) {
+      } else if (val > end) {
         if (startedAt != null) {
-          return {start: indexArr.get(startedAt) as bigint, end: indexArr.get(i) as bigint}
+          return {
+            start: indexArr.get(startedAt) as bigint,
+            end: indexArr.get(i) as bigint,
+          };
         } else {
-          return null
+          return null;
         }
       }
     }

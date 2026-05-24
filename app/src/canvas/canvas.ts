@@ -247,7 +247,6 @@ export class MSCanvasBase<T extends PointLike> {
     const maxMz = this.maxXDim();
     const upperBound = this.scanRange?.upperBound || Infinity;
     const padded = Math.min(maxMz * 1.1, maxMz + 50.0);
-    console.log(maxMz, padded, upperBound)
     return Math.min(padded, upperBound);
   }
 
@@ -435,7 +434,6 @@ export class MSCanvasBase<T extends PointLike> {
   }
 
   resetZoom() {
-    console.log("Resetting Canvas...");
     if (!this.xScale || !this.yScale) {
       throw new Error("Uninitialized scales");
     }
@@ -494,7 +492,6 @@ export class MSCanvasBase<T extends PointLike> {
     );
 
     this.extentCoordinateInterval = [minCoordinate, maxCoordinate];
-    console.log(this.extentCoordinateInterval)
     this.xScale.domain([minCoordinate, maxCoordinate]);
     this.yScale.domain([0, maxIntensity * 1.05]);
     this.xAxis
@@ -554,7 +551,6 @@ export class MSCanvasBase<T extends PointLike> {
   draw() {
     this.colorCycle.reset();
     this.layers.map((layer) => layer.initArtist(this));
-    console.log(this.minCoordinate(), this.maxCoordinate())
   }
 }
 

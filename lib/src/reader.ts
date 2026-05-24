@@ -13,7 +13,7 @@ import {
 } from "./data";
 import { BufferContext } from "./array_index";
 import { PointLike, Spectrum } from "./record";
-import { Span1D } from "./utils";
+import { Span1D, Span1DBigInt } from "./utils";
 import { bigIntToNumber } from "apache-arrow/util/bigint";
 import { DataArrays } from './data';
 
@@ -144,18 +144,48 @@ export class MzPeakReader<T> implements AsyncIterable<Spectrum> {
   async *enumerateSpectra() {
     if (!this.spectrumMetadata) return;
     const dataReader = await this.spectrumData();
-    if (!dataReader) return;
-    const it = dataReader.enumerate();
-    let n = this.spectrumMetadata.length;
+    const peakReader = await this.spectrumPeaks();
+    const dataIter = dataReader?.enumerate();
+    const peakIter = peakReader?.enumerate();
+    const n = this.spectrumMetadata.length;
+    const dpCounts = this.spectrumMetadata.dataPointCount();
+    const peakCounts = this.spectrumMetadata.peakCount();
     for (let i = 0; i < n; i++) {
       const meta = this.spectrumMetadata.get(i);
-      await it.seek(BigInt(i));
-      let { done, value: data } = await it.next();
-      if (done) break;
-      data = data[1];
-      if (data) {
-        meta["dataArrays"] = packTableIntoDataArrays(data);
+      const bigIndex = BigInt(i);
+      let hadData = 0
+
+      const dpCount = dpCounts?.get(i)
+      if (
+        dpCount &&
+        dataIter
+      ) {
+        await dataIter.seek(bigIndex)
+        let { done, value: data } = await dataIter.next();
+        if (!done) {
+          hadData++;
+        }
+
+        data = data[1];
+        if (data) {
+          meta["dataArrays"] = packTableIntoDataArrays(data);
+        }
       }
+
+      const peakCount = peakCounts?.get(i)
+      if (peakCount && peakIter && (await peakIter.seek(bigIndex))) {
+        let { done, value: data } = await peakIter.next();
+        if (!done) {
+          hadData++;
+        }
+        data = data[1];
+        const peaks = packTableIntoPeaks(data) as any as PointLike[];
+        meta.centroids = peaks;
+      }
+
+      if (hadData == 0) {
+        console.log("No data for ", i)
+      };
       yield meta;
     }
   }
@@ -197,16 +227,23 @@ export class MzPeakReader<T> implements AsyncIterable<Spectrum> {
     const index = BigInt(index_);
     const meta = this.spectrumMetadata?.get(index);
     if (meta) {
-      const handle = await this.spectrumData();
-      const data = await handle?.get(index);
-      if (data) {
-        meta["dataArrays"] = packTableIntoDataArrays(data);
+      const indexNum = bigIntToNumber(index);
+      const dpCount = this.spectrumMetadata?.dataPointCount(indexNum)
+      if (dpCount) {
+        const handle = await this.spectrumData();
+        const data = await handle?.get(index);
+        if (data) {
+          meta["dataArrays"] = packTableIntoDataArrays(data);
+        }
       }
-      const peakHandle = await this.spectrumPeaks();
-      const peakData = await peakHandle?.get(index);
-      if (peakData && peakData.numRows > 0) {
-        const peaks = packTableIntoPeaks(peakData) as any as PointLike[];
-        meta.centroids = peaks;
+      const peakCount = this.spectrumMetadata?.peakCount(indexNum);
+      if (peakCount) {
+        const peakHandle = await this.spectrumPeaks();
+        const peakData = await peakHandle?.get(index);
+        if (peakData && peakData.numRows > 0) {
+          const peaks = packTableIntoPeaks(peakData) as any as PointLike[];
+          meta.centroids = peaks;
+        }
       }
       return meta;
     }
@@ -215,15 +252,16 @@ export class MzPeakReader<T> implements AsyncIterable<Spectrum> {
   async extractXIC(
     timeRange: Span1D | null,
     mzRange: Span1D | null = null,
+    useProfile: boolean = true,
   ): Promise<XIC | null> {
     if (!this.spectrumMetadata) return null;
-    let indexRange = null;
+    let indexRange: Span1DBigInt | null = null;
     if (timeRange)
       indexRange = this.spectrumMetadata?.timeRangeToIndices(
         timeRange.start,
         timeRange.end,
       );
-    const reader = await this.spectrumData();
+    const reader = await (useProfile ? this.spectrumData() : this.spectrumPeaks());
     if (!reader) return null;
     const points = (await reader.extractRangeFor(
       indexRange,
