@@ -217,6 +217,7 @@ export class SpectrumViewerState {
     timeEnd: number,
     mzStart: number,
     mzEnd: number,
+    useCentroids: boolean = false
   ) {
     if (!this.mzReader) {
       return null;
@@ -227,6 +228,7 @@ export class SpectrumViewerState {
     const xic = await this.mzReader.extractXIC(
       { start: timeStart, end: timeEnd },
       { start: mzStart, end: mzEnd },
+      !useCentroids
     );
     console.log('Extracted', xic)
     return xic

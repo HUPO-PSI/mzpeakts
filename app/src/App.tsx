@@ -179,7 +179,8 @@ export function Frame() {
         xicSpec.startTime,
         xicSpec.endTime,
         xicSpec.startMz,
-        xicSpec.endMz).then((value) => {
+        xicSpec.endMz,
+        xicSpec.useCentroids).then((value) => {
           if (value == null) {
             viewStateDispatch({
               type: ViewerActionType.StatusMessage,

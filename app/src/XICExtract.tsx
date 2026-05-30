@@ -11,6 +11,8 @@ import FindInPageIcon from "@mui/icons-material/FindInPage";
 import CheckCircleOutlineIcon from "@mui/icons-material/CheckCircleOutline";
 import ErrorOutlineIcon from "@mui/icons-material/ErrorOutline";
 import { useSpectrumViewer } from "./util";
+import FormControlLabel from "@mui/material/FormControlLabel";
+import Checkbox from "@mui/material/Checkbox";
 
 type XICValidationState =
   | { status: "valid" }
@@ -58,6 +60,7 @@ export type XICTarget = {
   endTime: number;
   startMz: number;
   endMz: number;
+  useCentroids: boolean
 };
 
 const endAdornment = (v: XICInputValue) => {
@@ -82,6 +85,7 @@ export function XICExtractDialog({ onLoad }: XICModalProps) {
   const [endTime, setEndTime] = useState(new XICInputValue("", Infinity));
   const [startMz, setStartMz] = useState(new XICInputValue("", 0));
   const [endMz, setEndMz] = useState(new XICInputValue("", Infinity));
+  const [useCentroids, setUseCentroids] = useState<boolean>(false);
 
   const state = useSpectrumViewer();
 
@@ -100,12 +104,17 @@ export function XICExtractDialog({ onLoad }: XICModalProps) {
       endTime: endTime.parse(),
       startMz: startMz.parse(),
       endMz: endMz.parse(),
+      useCentroids
     };
   };
 
   const handleLoad = () => {
     onLoad(prepareState());
     handleClose();
+  };
+
+  const handleChangeCentroidPref = (event: React.ChangeEvent<HTMLInputElement>) => {
+    setUseCentroids(event.target.checked);
   };
   return (
     <>
@@ -166,6 +175,16 @@ export function XICExtractDialog({ onLoad }: XICModalProps) {
                 ) : null,
               },
             }}
+          />
+
+          <FormControlLabel
+            control={
+              <Checkbox
+                checked={useCentroids}
+                onChange={handleChangeCentroidPref}
+              />
+            }
+            label="Use centroids?"
           />
           <TextField
             autoFocus
