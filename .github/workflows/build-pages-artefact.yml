@@ -8,20 +8,23 @@ on:
 jobs:
   build-demo:
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: app
-
     steps:
       - uses: actions/checkout@v6
-
       - uses: actions/setup-node@v6
         with:
           node-version: '22'
           # cache: 'npm'
+      - name: Build library
+        run: |
+          echo `pwd`
+          cd lib/
+          npm install .
+          npm run build
+          cd ../
       - name: Install dependencies
         run: |
           echo `pwd`
+          cd app/
           npm install ../lib/vendor/parquet-wasm/pkg/
           npm install --install-links ../lib
           npm install --install-links --include=dev .

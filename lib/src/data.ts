@@ -261,7 +261,6 @@ export function findMaskedPairs(
   const result: [number, number][] = [];
   for (let i = 0; i < nullHere.length; i += 2) {
     if (isNaN(nullHere[i]) || isNaN(nullHere[i + 1])) {
-      debugger;
       throw new Error(
         `Bad pair ${[nullHere[i], nullHere[i + 1]]}, ${nullHere}`,
       );
@@ -1109,11 +1108,19 @@ export class DataArraysReader {
     return entries;
   }
 
+  /**
+   * Extract a contiguous region of the coordinate space in an entry index range, like when building and
+   * extracted ion chromatogram (XIC)
+   *
+   * @param indexRange The start and end entry index to extract between, otherwise all entries are used
+   * @param coordinateRange The start and end coordinate (e.g. m/z, time) to extract between, otherwise all points are used
+   * @returns An array of untimed {@coderef XICPoint}
+   */
   async extractRangeFor(
     indexRange: Span1DBigInt | null,
     coordinateRange: Span1D | null = null,
   ) {
-    let iter;
+    let iter = null;
     let endIdx = null;
     if (indexRange == null) {
       iter = await this.enumerate();
@@ -1135,6 +1142,7 @@ export class DataArraysReader {
         : last,
     );
     for await (const [index, entry] of iter) {
+      console.log(entry)
       if (endIdx != null && endIdx < index) break;
       if (coordinateRange) {
         const coordinatesOf = (entry as Arrow.Table).getChild(
@@ -1147,6 +1155,8 @@ export class DataArraysReader {
           coordinateRange.start,
           coordinateRange.end,
         );
+
+        // Extract for just the slice of the coordinate dimension
         if (idxRange) {
           entries.push({
             index,
@@ -1156,6 +1166,7 @@ export class DataArraysReader {
           });
         }
       } else {
+        // Collect everything
         entries.push({
           index,
           dataArrays: packTableIntoDataArrays(entry as Arrow.Table),
@@ -1168,12 +1179,12 @@ export class DataArraysReader {
   async _getRangeIter(start: bigint, end: bigint) {
     const rowGroupsStart = this.rowGroupIndex.keysFor(start);
     const rowGroupsEnd = this.rowGroupIndex.keysFor(end);
-    let i = rowGroupsStart[0];
+    let i = rowGroupsStart[0] ?? 0;
     let skipped = 0;
     for (let j = 0; j < i; j++) {
       skipped += this.handle.metadata().rowGroup(j).numRows();
     }
-    const lastRgIdx = rowGroupsEnd[rowGroupsEnd.length - 1];
+    const lastRgIdx = rowGroupsEnd[rowGroupsEnd.length - 1] ?? Math.max.apply(null, rowGroupsStart.map(bigIntToNumber));
     const rowGroupsTotal: bigint[] = [];
     while (i <= lastRgIdx) {
       rowGroupsTotal.push(i);
@@ -1192,7 +1203,7 @@ export class DataArraysReader {
     }
     const batches = streamArrowBatches(
       this.handle,
-      rowGroupsTotal.map(Number),
+      rowGroupsTotal.map(bigIntToNumber),
       undefined,
       opts,
     );
@@ -1439,8 +1450,10 @@ export class PeekableDataStreamIterator
       this.peeked = null;
       await this.peek();
       return { done: false, value };
+    } else {
+      return await this.inner.next();
     }
-    return { done: true, value: undefined as any };
+
   }
 
   async seek(index_: bigint) {

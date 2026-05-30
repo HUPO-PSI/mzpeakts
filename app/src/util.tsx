@@ -228,6 +228,7 @@ export class SpectrumViewerState {
       { start: timeStart, end: timeEnd },
       { start: mzStart, end: mzEnd },
     );
+    console.log('Extracted', xic)
     return xic
   }
 
@@ -331,6 +332,10 @@ export const viewReducer = (
     }
     case ViewerActionType.XICExtract: {
       nextState.chromatogramData = new ChromatogramData(null, action.target);
+      nextState.statusMessage = {
+        text: null,
+        icon: null
+      }
     }
   }
   return nextState;

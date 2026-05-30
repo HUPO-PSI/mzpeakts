@@ -36,7 +36,7 @@ export {
   RangeIndex,
   GroupTagBounds,
   SpacingInterpolationModel,
-  DataStreamIterator,
+  PeekableDataStreamIterator,
   ChunkLayoutReader,
   PointLayoutReader,
 } from "./data";

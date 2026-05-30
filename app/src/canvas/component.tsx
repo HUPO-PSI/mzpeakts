@@ -186,9 +186,6 @@ export class CanvasState {
       }
     }
     const idMatch = this.canvas?.spectrumID == this.spectrumData?.id;
-    console.log(
-      `${idMatch}: ${this.canvas?.spectrumID} ${this.spectrumData?.id}`,
-    );
     if (this.canvas?.layers !== this.spectrumData?.layers) {
       let extent = this.canvas.extentCoordinateInterval;
 

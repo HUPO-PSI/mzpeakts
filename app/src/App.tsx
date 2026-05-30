@@ -186,15 +186,13 @@ export function Frame() {
               text: `No spectrum data available, cannot extract XIC`,
             });
           } else {
-            viewStateDispatch({
-              type: ViewerActionType.XICExtract,
-              target: value
-            })
-            viewStateDispatch({
-              type: ViewerActionType.StatusMessage,
-              text: null
-            });
-            setTabIndex(1)
+            setTimeout(() => {
+              viewStateDispatch({
+                type: ViewerActionType.XICExtract,
+                target: value
+              })
+              setTabIndex(1)
+            }, 5000)
           }
         })
         setXICSpec(null)

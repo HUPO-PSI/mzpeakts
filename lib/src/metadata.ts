@@ -515,6 +515,13 @@ export class SpectrumMetadata extends MetadataReaderBase {
     this._selectedIons = null;
   }
 
+  /**
+   * Convert a time range to a contiguous span of indices
+   *
+   * @param start The starting time in minutes
+   * @param end The ending time in minutes
+   * @returns The index range that corresponds to the time interval requested
+   */
   timeRangeToIndices(start: number, end: number): Span1DBigInt | null {
     if (!this._spectra)
       throw new Error("Cannot query spectrum indices, table not loaded");
@@ -550,6 +557,11 @@ export class SpectrumMetadata extends MetadataReaderBase {
     }
   }
 
+  /**
+   * Read the run-level metadata from the Parquet file footer
+   *
+   * @returns {FileMetadata} The run level metadata
+   */
   fileMetadata() {
     return FileMetadata.fromParquet(this.handle);
   }
@@ -596,6 +608,11 @@ export class SpectrumMetadata extends MetadataReaderBase {
     return this;
   }
 
+  /**
+   * Load the spacing models from the metadata table.
+   *
+   * @returns A mapping to {@coderef SpacingInterpolationModel} for spectra with a fitted model.
+   */
   loadSpacingModelIndex(): Map<bigint, SpacingInterpolationModel> | null {
     if (this.spectra === null) return null;
     const indexArr = this.spectra.getChildAt(0) as Arrow.Vector<Arrow.Uint64>;
@@ -639,7 +656,12 @@ export class SpectrumMetadata extends MetadataReaderBase {
     return this._selectedIons;
   }
 
-  get(index: number | bigint) {
+  /**
+   * Fetch the metadata record
+   * @param index The index of the spectrum to read out
+   * @returns The metadata record for a {@coderef Spectrum}
+   */
+  get(index: number | bigint) : Spectrum {
     if (index >= this.length) throw new Error("Index out of range");
     let index_ = bigIntToNumber(index);
     let index_n = BigInt(index);
