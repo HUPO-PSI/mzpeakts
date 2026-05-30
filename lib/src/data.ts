@@ -1142,7 +1142,6 @@ export class DataArraysReader {
         : last,
     );
     for await (const [index, entry] of iter) {
-      console.log(entry)
       if (endIdx != null && endIdx < index) break;
       if (coordinateRange) {
         const coordinatesOf = (entry as Arrow.Table).getChild(
