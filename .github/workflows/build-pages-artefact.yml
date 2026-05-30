@@ -30,9 +30,14 @@ jobs:
           npm install --install-links --include=dev .
 
       - name: Build Demo
-        run: npm run build
+        run: |
+          echo `pwd`
+          cd app/
+          npm run build
       - name: Copy static data
         run: |
+          echo `pwd`
+          cd app/
           cp -r static/ dist/app/
           mv dist/app/index.html dist/app/app.html
           cp ../index.html dist/app/
