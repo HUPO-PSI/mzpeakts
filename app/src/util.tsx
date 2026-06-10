@@ -36,7 +36,7 @@ export class SpectrumData {
 
   get scanRange() {
     const event = this.spectrum.scans[0];
-    if (event) {
+    if (event && event.scanWindows.length > 0) {
       const scanWindow = event.scanWindows[0];
       return {
         lowerBound: scanWindow.lowerBound,
