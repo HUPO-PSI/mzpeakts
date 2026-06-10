@@ -1175,6 +1175,15 @@ export class DataArraysReader {
     return entries;
   }
 
+  /**
+   * An internal helper method to open a narrower Parquet reading iterator.
+   *
+   * See {@coderef extractForRange} for the high level interface
+   *
+   * @param start The entry index to start iterating from
+   * @param end The entry index to stop iterating at
+   * @returns A peekable iterator between those two points
+   */
   async _getRangeIter(start: bigint, end: bigint) {
     const rowGroupsStart = this.rowGroupIndex.keysFor(start);
     const rowGroupsEnd = this.rowGroupIndex.keysFor(end);
@@ -1211,6 +1220,12 @@ export class DataArraysReader {
     return iter;
   }
 
+  /**
+   * Open a new streaming iterator for this data file
+   *
+   * @param batchSize The size of the batch to load from the Parquet at a time
+   * @returns An iterator over the entire data file reader
+   */
   enumerate(batchSize: number | undefined = 32768): PeekableDataStreamIterator {
     const iter = new DataStreamIterator(
       this,
@@ -1247,6 +1262,12 @@ function vectorWhere(mask: boolean[]) {
   return indices;
 }
 
+/**
+ * An incremental, entry-level data iterator that internally buffers
+ * and chunks the linear data stream.
+ *
+ * This is an {@coderef AsyncIterator}
+ */
 export class DataStreamIterator
   implements
     AsyncIterator<[bigint, Arrow.Table | ColumnMap]>,
@@ -1276,10 +1297,21 @@ export class DataStreamIterator
     return this._current;
   }
 
+  /**
+   * Set the coordinate range to let the iterator make better decisions about
+   * how to decode data
+   *
+   * @param query The coordinate interval to restrict reading for
+   */
   setQueryCoordinateRange(query: Span1D | null) {
     this.layoutReader.queryCoordinateRange = query;
   }
 
+  /**
+   * Read the next {@code RecordBatch} from the underlying Parquet iterator stream
+   * @param updateIndex Whether or not to update `this.currentIndex` from the new batch
+   * @returns Whether a new batch was read
+   */
   private async readNextBatch(updateIndex: boolean = false) {
     this.currentBatch = null;
     let batchMsg = await this.batchStream.next();
@@ -1318,6 +1350,13 @@ export class DataStreamIterator
     return mask.some((e) => e);
   }
 
+  /**
+   * Read the next index in the current record batch, which may not be
+   * the previous index + 1. This assumes that the batch stream is well
+   * formed and ascending.
+   *
+   * @returns The next earliest index value in the current batch
+   */
   private batchNextIndex() {
     if (this.currentBatch == null) return null
     const indexArr = this.currentBatch.getChildAt(
@@ -1326,6 +1365,10 @@ export class DataStreamIterator
     return indexArr.get(0)
   }
 
+  /**
+   *
+   * @returns The {@coderef Arrow.Vector} for the thing that is the current index
+   */
   private async extractForCurrentIndex(): Promise<Arrow.Vector<Arrow.Struct> | null> {
     if (this.currentBatch == null || this.currentIndex == null) return null;
     const indexArr = this.currentBatch.getChildAt(
@@ -1415,6 +1458,10 @@ export class DataStreamIterator
 }
 
 
+/**
+ * A wrapper around {@coderef DataStreamIterator} that is peekable, letting the caller
+ * ask what the next value is without consuming it.
+ */
 export class PeekableDataStreamIterator
   implements
     AsyncIterator<[bigint, Arrow.Table | ColumnMap]>,
@@ -1428,10 +1475,16 @@ export class PeekableDataStreamIterator
     this.peeked = null;
   }
 
+  /** Get the index for the value the underlying iterator is currently at */
   get currentIndex() {
-    return this.peeked ? this.peeked[0] : null
+    return this.peeked ? this.peeked[0] : null;
   }
 
+  /**
+   * Check the next value from the underlying iterator without "consuming" it.
+   *
+   * @returns The next [index, table] pair that the iterator will produce, if more data are available
+   */
   async peek() {
     if (this.peeked == null) {
       const { done, value } = await this.inner.next();
@@ -1443,6 +1496,11 @@ export class PeekableDataStreamIterator
     return this.peeked;
   }
 
+  /**
+   * Fetch the next value from the iterator
+   *
+   * @returns The next [index, table] pair
+   */
   async next() {
     if (this.peeked) {
       const value = this.peeked;
@@ -1452,7 +1510,6 @@ export class PeekableDataStreamIterator
     } else {
       return await this.inner.next();
     }
-
   }
 
   async seek(index_: bigint) {
@@ -1488,6 +1545,12 @@ export class PeekableDataStreamIterator
     }
   }
 
+  /**
+   * Set the coordinate range to let the iterator make better decisions about
+   * how to decode data
+   *
+   * @param query The coordinate interval to restrict reading for
+   */
   setQueryCoordinateRange(query: Span1D | null) {
     this.inner.setQueryCoordinateRange(query);
   }
