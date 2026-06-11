@@ -129,11 +129,34 @@ export class ChromatogramData {
   buildChromatogramLayers() {
     if (!this.chromatogram) return
     if (!this.chromatogram.dataArrays) return
+    let timeArr = this.chromatogram.dataArrays["time array"] as Float64Array
+    let intensityArr = this.chromatogram.dataArrays[
+      "intensity array"
+    ];
+    if (!intensityArr) {
+      const allArrays = Object.entries(this.chromatogram.dataArrays)
+      if (allArrays.length > 1) {
+        const candidates = allArrays.filter(([key, val]) => key != "time array" && val.length == timeArr.length);
+        const valOf: any = candidates[0][1][0]
+        if (!(valOf instanceof String))
+          intensityArr = candidates[0][1] as Float32Array;
+        else {
+          intensityArr = [];
+        }
+      }
+    }
+    if (!intensityArr || intensityArr.length == 0) {
+      const tmp = []
+      for(let i = 0; i < timeArr.length; i++) {
+        tmp.push(0.0)
+      }
+      intensityArr = Float32Array.from(tmp)
+    }
 
     this.layers.push(
       new ProfileLayer(
-        this.chromatogram.dataArrays["time array"] as Float64Array,
-        this.chromatogram.dataArrays["intensity array"] as Float32Array,
+        timeArr,
+        intensityArr as Float32Array,
         { subsample: false },
       ),
     );

@@ -168,7 +168,7 @@ export class MzPeakReader<T> implements AsyncIterable<Spectrum> {
 
         data = data[1];
         if (data) {
-          meta["dataArrays"] = packTableIntoDataArrays(data);
+          Object.assign(meta["dataArrays"], packTableIntoDataArrays(data));
         }
       }
 
@@ -233,7 +233,7 @@ export class MzPeakReader<T> implements AsyncIterable<Spectrum> {
         const handle = await this.spectrumData();
         const data = await handle?.get(index);
         if (data) {
-          meta["dataArrays"] = packTableIntoDataArrays(data);
+          Object.assign(meta["dataArrays"], packTableIntoDataArrays(data));
         }
       }
       const peakCount = this.spectrumMetadata?.peakCount(indexNum);
@@ -306,7 +306,7 @@ export class MzPeakReader<T> implements AsyncIterable<Spectrum> {
       const handle = await this.chromatogramData();
       const data = await handle?.get(index);
       if (data) {
-        meta["dataArrays"] = packTableIntoDataArrays(data);
+        Object.assign(meta["dataArrays"], packTableIntoDataArrays(data));
       }
       return meta;
     }
@@ -323,7 +323,7 @@ export class MzPeakReader<T> implements AsyncIterable<Spectrum> {
       const handle = await this.wavelengthSpectrumData();
       const data = await handle?.get(index);
       if (data) {
-        meta["dataArrays"] = packTableIntoDataArrays(data);
+        Object.assign(meta["dataArrays"], packTableIntoDataArrays(data));
       }
       return meta;
     }

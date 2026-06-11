@@ -679,7 +679,13 @@ export class SpectrumMetadata extends MetadataReaderBase {
     if (!spectrumRecord)
       throw new Error("Invalid state, spectrum record not found");
     spectrumRecord.parameters = Param.fromArrow(spectrumRecord.parameters);
-
+    const auxArraysCount = spectrumRecord.auxiliary_arrays?.length || 0;
+    let auxiliaryArrays = null
+    if (auxArraysCount > 0) {
+      auxiliaryArrays = AuxiliaryArrayDecoder.decode(
+        spectrumRecord.auxiliary_arrays,
+      );
+    }
     indexArr = this.scans?.getChild(
       "source_index",
     ) as Arrow.Vector<Arrow.Uint64>;
@@ -735,7 +741,7 @@ export class SpectrumMetadata extends MetadataReaderBase {
       }
     }
 
-    return Spectrum.fromRecord(spectrumRecord);
+    return Spectrum.fromRecord(spectrumRecord, auxiliaryArrays);
   }
 }
 
@@ -821,6 +827,13 @@ export class ChromatogramMetadata extends MetadataReaderBase {
     chromatogramRecord.parameters = Param.fromArrow(
       chromatogramRecord.parameters,
     );
+    const auxArraysCount = chromatogramRecord.auxiliary_arrays?.length || 0;
+    let auxiliaryArrays = null;
+    if (auxArraysCount > 0) {
+      auxiliaryArrays = AuxiliaryArrayDecoder.decode(
+        chromatogramRecord.auxiliary_arrays,
+      );
+    }
 
     if (this.precursors != null) {
       indexArr = this.precursors?.getChild(
@@ -862,6 +875,82 @@ export class ChromatogramMetadata extends MetadataReaderBase {
       }
     }
 
-    return Chromatogram.fromRecord(chromatogramRecord);
+    return Chromatogram.fromRecord(chromatogramRecord, auxiliaryArrays);
+  }
+}
+
+
+export class AuxiliaryArray {
+  name: string;
+  values: Int32Array | Float32Array | Float64Array | BigInt64Array | string[];
+  parameters: Param[];
+  unit: string | null;
+
+  constructor(
+    name: string,
+    values: Int32Array | Float32Array | Float64Array | BigInt64Array | string[],
+    parameters?: Param[],
+    unit: string | null = null,
+  ) {
+    this.name = name;
+    this.values = values;
+    this.parameters = parameters || [];
+    this.unit = unit;
+  }
+}
+
+
+export class AuxiliaryArrayDecoder {
+  static ArrayTypes: Record<
+    string,
+    | Int32ArrayConstructor
+    | Float32ArrayConstructor
+    | BigInt64ArrayConstructor
+    | Float64ArrayConstructor
+  > = {
+    "MS:1000519": Int32Array,
+    "MS:1000521": Float32Array,
+    "MS:1000522": BigInt64Array,
+    "MS:1000523": Float64Array,
+  };
+
+  static StringType = "MS:1001479";
+
+  static decode(states: Arrow.Vector) {
+    const namesArrow = states.getChild("name");
+    if (namesArrow == null)
+      throw new TypeError(`Auxiliary arrays must have a "name" field!`);
+    const names = Param.fromArrow(namesArrow);
+    const auxArrays = [];
+    for (let i = 0; i < names.length; i++) {
+      const nameOf = names[i];
+      const record: {
+        name: any;
+        data: Arrow.Vector;
+        data_type: string;
+        unit: string | null;
+        compression: string;
+        parameters: Arrow.Vector;
+      } = states.at(i).toJSON();
+      const valuesBytes = record.data.toArray();
+      const buf = new Uint8Array(valuesBytes.length);
+      buf.set(valuesBytes, 0);
+      const arrayType = AuxiliaryArrayDecoder.ArrayTypes[record.data_type];
+      let values;
+      if (arrayType) {
+        values = new arrayType(buf.buffer);
+      } else if (record.data_type == AuxiliaryArrayDecoder.StringType) {
+        const decoder = new TextDecoder('utf8');
+        console.log(buf.buffer)
+        values = decoder.decode(buf.buffer).split("\0")
+      } else {
+        throw Error(`Data type ${record.data_type} not implemented`);
+      }
+      const params = Param.fromArrow(record.parameters);
+      auxArrays.push(
+        new AuxiliaryArray(nameOf.name, values, params, record.unit),
+      );
+    }
+    return auxArrays;
   }
 }

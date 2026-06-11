@@ -1,5 +1,5 @@
 import { DataArrays } from "./data";
-import { Param, ParamColumnSpec } from "./metadata";
+import { AuxiliaryArray, Param, ParamColumnSpec } from "./metadata";
 
 export class ParamDescribed {
   params: Param[];
@@ -219,8 +219,9 @@ export class Spectrum extends ParamDescribed {
   precursors: Precursor[];
   selectedIons: SelectedIon[];
   meta: any | null;
-  dataArrays?: DataArrays;
-  centroids?: PointLike[];
+  dataArrays: DataArrays;
+  centroids: PointLike[] | null;
+  auxiliaryArrays: AuxiliaryArray[] | null;
 
   constructor(
     id: string,
@@ -234,7 +235,9 @@ export class Spectrum extends ParamDescribed {
     precursors?: any[],
     selectedIons?: any[],
     meta?: any | null,
-    dataArrays?: DataArrays,
+    dataArrays: DataArrays | null = null,
+    centroids: PointLike[] | null = null,
+    auxiliaryArrays: AuxiliaryArray[] | null = null,
   ) {
     super(params);
     this.id = id;
@@ -248,7 +251,14 @@ export class Spectrum extends ParamDescribed {
     this.precursors = precursors ?? [];
     this.selectedIons = selectedIons ?? [];
     this.meta = meta ?? null;
-    this.dataArrays = dataArrays;
+    this.dataArrays = dataArrays ?? {};
+    this.centroids = centroids;
+    this.auxiliaryArrays = auxiliaryArrays;
+    if (this.auxiliaryArrays) {
+      this.auxiliaryArrays.forEach(aux => {
+        this.dataArrays[aux.name] = aux.values
+      })
+    }
   }
 
   get rawArrays() {
@@ -273,7 +283,10 @@ export class Spectrum extends ParamDescribed {
     }
   }
 
-  static fromRecord(record: any) {
+  static fromRecord(
+    record: any,
+    auxiliaryArrays: AuxiliaryArray[] | null = null,
+  ) {
     return new Spectrum(
       record.id,
       record.index,
@@ -287,6 +300,8 @@ export class Spectrum extends ParamDescribed {
       (record["selectedIons"] ?? []).map(SelectedIon.fromRecord),
       record,
       record.dataArrays,
+      null,
+      auxiliaryArrays
     );
   }
 }
@@ -298,7 +313,8 @@ export class Chromatogram extends ParamDescribed {
   precursors: Precursor[];
   selectedIons: SelectedIon[];
   meta: any | null;
-  dataArrays?: DataArrays;
+  dataArrays: DataArrays;
+  auxiliaryArrays: AuxiliaryArray[] | null;
 
   constructor(
     id: string,
@@ -308,6 +324,7 @@ export class Chromatogram extends ParamDescribed {
     selectedIons?: any[],
     meta?: any | null,
     dataArrays?: DataArrays,
+    auxiliaryArrays: AuxiliaryArray[] | null = null,
   ) {
     super(params);
     this.id = id;
@@ -316,14 +333,23 @@ export class Chromatogram extends ParamDescribed {
     this.precursors = precursors ?? [];
     this.selectedIons = selectedIons ?? [];
     this.meta = meta ?? null;
-    this.dataArrays = dataArrays;
+    this.dataArrays = dataArrays ?? {};
+    this.auxiliaryArrays = auxiliaryArrays;
+    if (this.auxiliaryArrays) {
+      this.auxiliaryArrays.forEach((aux) => {
+        this.dataArrays[aux.name] = aux.values;
+      });
+    }
   }
 
   get rawArrays() {
     return this.dataArrays;
   }
 
-  static fromRecord(record: any) {
+  static fromRecord(
+    record: any,
+    auxiliaryArrays: AuxiliaryArray[] | null = null,
+  ) {
     const parameters = record.parameters.map(Param.fromArrow);
     return new Chromatogram(
       record.id,
@@ -333,6 +359,7 @@ export class Chromatogram extends ParamDescribed {
       (record["selectedIons"] ?? []).map(SelectedIon.fromRecord),
       record,
       record.dataArrays,
+      auxiliaryArrays
     );
   }
 }

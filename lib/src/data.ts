@@ -15,7 +15,7 @@ import { bigIntToNumber } from "apache-arrow/util/bigint";
 import { betweenSorted, intervalOverlaps, Span1D, Span1DBigInt } from "./utils";
 import { decodeLinear, ACC_NUMPRESS_LINEAR, ACC_NUMPRESS_SLOF, ArrowArrayAppender as NumpressArrowAppender, decodeSlof } from "./numpress"
 
-export type DataArrays = Record<string, FloatArray | IntArray | string[]>;
+export type DataArrays = Record<string, FloatArray | IntArray | BigInt64Array | string[]>;
 
 export function packTableIntoDataArrays(table: Arrow.Table): DataArrays {
   const dataArrays: DataArrays = {};
