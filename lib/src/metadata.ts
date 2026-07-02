@@ -78,6 +78,9 @@ export class Param {
   }
 
   static fromArrow(array: Arrow.Vector) {
+    // A missing or empty parameter list is valid (a scan/spectrum may carry zero cvParams);
+    // return an empty array instead of dereferencing a null/undefined column.
+    if (array == null) return [] as Param[];
     const names = array.getChild("name") as Arrow.Vector<Arrow.Utf8>;
     const accessions = array.getChild("accession") as Arrow.Vector<Arrow.Utf8>;
     const units = array.getChild("unit") as Arrow.Vector<Arrow.Utf8>;
