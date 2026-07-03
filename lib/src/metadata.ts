@@ -77,7 +77,8 @@ export class Param {
     return new Param(raw.name, raw.value, raw.accession, raw.unit);
   }
 
-  static fromArrow(array: Arrow.Vector) {
+  static fromArrow(array: Arrow.Vector | null | undefined) {
+    if (!array) return []
     const names = array.getChild("name") as Arrow.Vector<Arrow.Utf8>;
     const accessions = array.getChild("accession") as Arrow.Vector<Arrow.Utf8>;
     const units = array.getChild("unit") as Arrow.Vector<Arrow.Utf8>;
@@ -941,7 +942,6 @@ export class AuxiliaryArrayDecoder {
         values = new arrayType(buf.buffer);
       } else if (record.data_type == AuxiliaryArrayDecoder.StringType) {
         const decoder = new TextDecoder('utf8');
-        console.log(buf.buffer)
         values = decoder.decode(buf.buffer).split("\0")
       } else {
         throw Error(`Data type ${record.data_type} not implemented`);

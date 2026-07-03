@@ -49,6 +49,6 @@ console.log(spec.id, spec.index, spec.dataArrays, spec.precursors, spec.selected
       - [ ] Numpress and opaque chunk transforms
   - [x] Chromatogram data arrays
   - [x] Spectrum peak arrays
-  - [ ] Auxiliary arrays
+  - [x] Auxiliary arrays
   - [x] ZIP archive storage
   - [ ] Directory storage

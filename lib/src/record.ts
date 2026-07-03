@@ -181,7 +181,7 @@ export class SelectedIon extends ParamDescribed {
   }
 
   static fromRecord(record: any) {
-    const parameters = record.parameters.map(Param.fromArrow);
+    const parameters = record?.parameters?.map(Param.fromArrow) || [];
     let charge: number | null;
     if (record["MS_1000041_charge_state"]) {
       charge = Number(record["MS_1000041_charge_state"]);
@@ -350,7 +350,7 @@ export class Chromatogram extends ParamDescribed {
     record: any,
     auxiliaryArrays: AuxiliaryArray[] | null = null,
   ) {
-    const parameters = record.parameters.map(Param.fromArrow);
+    const parameters = record?.parameters?.map(Param.fromArrow) || [];
     return new Chromatogram(
       record.id,
       record.index,
