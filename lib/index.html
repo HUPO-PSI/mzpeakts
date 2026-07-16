@@ -8,11 +8,13 @@
         import * as mzpeakts from "./src";
         import * as arrow from "apache-arrow"
         import * as arrowFFI from "arrow-js-ffi";
+        import * as parquet from "parquet-wasm";
         window.arrow = arrow
         window.arrowFFI = arrowFFI
         window.mzpeakts = mzpeakts;
+        window.parquet = parquet;
 
-        window.reader = await mzpeakts.MzPeakReader.fromUrl("/static/small.chunked.mzpeak")
+        window.reader = await mzpeakts.MzPeakReader.fromUrl("/static/small.mzpeak")
         window.dataReader = await window.reader.spectrumData()
         window.cDataReader = await window.reader.chromatogramData()
     </script>

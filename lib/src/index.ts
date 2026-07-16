@@ -1,5 +1,7 @@
 export {
+  DataKindTag,
   DataKind,
+  EntityTypeTag,
   EntityType,
   FileIndex,
   FileIndexEntry,
@@ -7,6 +9,7 @@ export {
   ZipStorage
 } from "./store";
 export {
+  ParquetTableNamespace,
   SpectrumMetadata,
   ChromatogramMetadata,
   Param,

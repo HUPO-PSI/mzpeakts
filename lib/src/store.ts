@@ -1,32 +1,135 @@
 // @ts-check
 import * as zip from "@zip.js/zip.js";
 import { ParquetFile, setPanicHook } from "parquet-wasm";
+import { Param, ParquetTableNamespace } from './metadata';
 
 setPanicHook();
 
-export enum DataKind {
-  DataArrays = "data arrays",
-  Metadata = "metadata",
-  Peaks = "peaks",
-  Proprietary = "proprietary",
+
+
+const SPECTRUM = "spectrum";
+const CHROMATOGRAM = "chromatogram";
+const WAVELENGTH_SPECTRUM = "wavelength_spectrum";
+
+const DATA_ARRAYS = "data_arrays";
+const METADATA = "metadata";
+const PEAKS = "peaks";
+const OTHER = "other";
+const SCANS = "scans";
+const PRECURSORS = "precursors";
+const SELECTED_IONS = "selected_ions";
+const PRODUCTS = "products";
+const PROPRIETARY = "proprietary";
+
+export enum DataKindTag {
+  DataArrays = DATA_ARRAYS,
+  Metadata = METADATA,
+  Peaks = PEAKS,
+  Proprietary = PROPRIETARY,
+  Other = OTHER,
+  Scans = SCANS,
+  Precursors = PRECURSORS,
+  SelectedIons = SELECTED_IONS,
+  Products = PRODUCTS,
 }
 
-export enum EntityType {
-  Spectrum = "spectrum",
-  Chromatogram = "chromatogram",
-  WavelengthSpectrum = "wavelength spectrum",
-  Other = "other",
+export class DataKind {
+  name: string;
+  tag: DataKindTag;
+
+  constructor(name: string, tag: DataKindTag) {
+    this.name = name;
+    this.tag = tag;
+  }
+
+  equals(other: string | DataKind | DataKindTag) {
+    if (other instanceof String) {
+      return this.name == other;
+    } else if (other instanceof DataKind) {
+      return this.name == other.name;
+    } else {
+      return this.tag == other;
+    }
+  }
+
+  static fromString(key: string) {
+    const maybe: string | undefined = (<any>DataKindTag)[key];
+    const tag: DataKindTag = maybe == undefined ? DataKindTag.Other : (<any>DataKindTag)[maybe];
+    return new DataKind(key, tag);
+  }
 }
+
+export enum EntityTypeTag {
+  Spectrum = SPECTRUM,
+  Chromatogram = CHROMATOGRAM,
+  WavelengthSpectrum = WAVELENGTH_SPECTRUM,
+  Other = OTHER,
+}
+
+
+export class EntityType {
+  name: string;
+  tag: EntityTypeTag;
+
+  constructor(name: string, tag: EntityTypeTag) {
+    this.name = name;
+    this.tag = tag;
+  }
+
+  equals(other: string | EntityType | EntityTypeTag) {
+    if (other instanceof String) {
+      return this.name == other;
+    } else if (other instanceof EntityType) {
+      return this.name == other.name;
+    } else {
+      return this.tag == other;
+    }
+  }
+
+  static fromString(key: string) {
+    const maybe: EntityTypeTag | undefined = (<any>EntityTypeTag)[key]
+    const tag: EntityTypeTag = maybe == undefined ? EntityTypeTag.Other : (<any>EntityTypeTag)[maybe];
+    return new EntityType(key, tag)
+  }
+}
+
+
+export class MetadataColumn {
+  name: string
+  path: string[]
+  accession: string | null = null
+  unit: string | null = null
+
+  constructor(name: string, path: string[], accession: string | null = null, unit: string | null = null) {
+    this.name = name
+    this.path = path
+    this.accession = accession
+    this.unit = unit
+  }
+
+  get leaf() {
+    return this.path[this.path.length - 1];
+  }
+
+  static fromRaw(value: any) {
+    return new MetadataColumn(value.name, value.path, value.accession || null, value.unit || null)
+  }
+}
+
 
 export class FileIndexEntry {
   name: string;
   data_kind: DataKind;
   entity_type: EntityType;
+  column_mapping: MetadataColumn[];
+  parameters: Param[];
 
-  constructor(name: string, data_kind: DataKind, entity_type: EntityType) {
+  constructor(name: string, data_kind: string, entity_type: string, column_mapping: any[], parameters: any[]) {
     this.name = name;
-    this.data_kind = data_kind;
-    this.entity_type = entity_type;
+    this.data_kind = DataKind.fromString(data_kind);
+    this.entity_type = EntityType.fromString(entity_type);
+    this.column_mapping = column_mapping ? column_mapping.map(MetadataColumn.fromRaw) : []
+    this.parameters = parameters ? parameters.map(Param.fromJSON) : []
   }
 
   get dataKind(): DataKind {
@@ -51,7 +154,7 @@ export class FileIndex {
 
   static fromRaw(indexObj: any) {
     const files = Array.from(indexObj.files).map(
-      (e: any) => new FileIndexEntry(e.name, e.data_kind, e.entity_type),
+      (e: any) => new FileIndexEntry(e.name, e.data_kind, e.entity_type, e.column_mapping, e.parameters),
     );
     return new FileIndex(files, indexObj.metadata);
   }
@@ -88,6 +191,10 @@ export class ZipStorage<T> {
     this.fileIndex = new FileIndex([]);
     this.entries = [];
     this.initialized = false;
+  }
+
+  async openMetadataNamespace(entityType: EntityTypeTag | EntityType) {
+    return ParquetTableNamespace.populateFromStorage(this, entityType)
   }
 
   /**
@@ -136,20 +243,20 @@ export class ZipStorage<T> {
   /**
    * Open a ZIP archive member based upon its entry in {@linkcode fileIndex}. This cannot open files not in the index
    * and should not be used to open proprietary files listed in the index directly.
-   * @param entityType The {@linkcode EntityType} to look up in the {@linkcode fileIndex}
-   * @param dataKind The {@linkcode DataKind} to look up in the {@linkcode fileIndex}
+   * @param entityType The {@linkcode EntityTypeTag} to look up in the {@linkcode fileIndex}
+   * @param dataKind The {@linkcode DataKindTag} to look up in the {@linkcode fileIndex}
    * @returns {RemoteBlob<T> | undefined} If a matching entry is found, then a `RemoteBlob` is returned,
    * otherwise `undefined` is returned instead.
    *
    * @see {@linkcode ZipStorage.open}
    */
   async openFromIndex(
-    entityType: EntityType,
-    dataKind: DataKind,
+    entityType: EntityTypeTag | EntityType,
+    dataKind: DataKindTag | DataKind,
   ): Promise<RemoteBlob<T> | undefined> {
     if (!this.initialized) await this.init();
     const entry = this.fileIndex.files.find(
-      (e) => e.dataKind == dataKind && e.entityType == entityType,
+      (e) => e.dataKind.equals(dataKind) && e.entityType.equals(entityType),
     );
     if (entry === undefined) return undefined;
     return this.open(entry.name);
@@ -157,8 +264,35 @@ export class ZipStorage<T> {
 
   async spectrumMetadata(): Promise<ParquetFile | undefined> {
     const blob = await this.openFromIndex(
-      EntityType.Spectrum,
-      DataKind.Metadata,
+      EntityTypeTag.Spectrum,
+      DataKindTag.Metadata,
+    );
+    if (!blob) return undefined;
+    return ParquetFile.fromFile(blob as any as Blob);
+  }
+
+  async spectrumScans(): Promise<ParquetFile | undefined> {
+    const blob = await this.openFromIndex(
+      EntityTypeTag.Spectrum,
+      DataKindTag.Scans,
+    );
+    if (!blob) return undefined;
+    return ParquetFile.fromFile(blob as any as Blob);
+  }
+
+  async spectrumPrecursors(): Promise<ParquetFile | undefined> {
+    const blob = await this.openFromIndex(
+      EntityTypeTag.Spectrum,
+      DataKindTag.Precursors,
+    );
+    if (!blob) return undefined;
+    return ParquetFile.fromFile(blob as any as Blob);
+  }
+
+  async spectrumSelectedIons(): Promise<ParquetFile | undefined> {
+    const blob = await this.openFromIndex(
+      EntityTypeTag.Spectrum,
+      DataKindTag.SelectedIons,
     );
     if (!blob) return undefined;
     return ParquetFile.fromFile(blob as any as Blob);
@@ -166,23 +300,53 @@ export class ZipStorage<T> {
 
   async spectrumData(): Promise<ParquetFile | undefined> {
     const blob = await this.openFromIndex(
-      EntityType.Spectrum,
-      DataKind.DataArrays,
+      EntityTypeTag.Spectrum,
+      DataKindTag.DataArrays,
     );
     if (!blob) return undefined;
     return ParquetFile.fromFile(blob as any as Blob);
   }
 
   async spectrumPeaks(): Promise<ParquetFile | undefined> {
-    const blob = await this.openFromIndex(EntityType.Spectrum, DataKind.Peaks);
+    const blob = await this.openFromIndex(
+      EntityTypeTag.Spectrum,
+      DataKindTag.Peaks,
+    );
     if (!blob) return undefined;
     return ParquetFile.fromFile(blob as any as Blob);
   }
 
   async chromatogramMetadata(): Promise<ParquetFile | undefined> {
     const blob = await this.openFromIndex(
-      EntityType.Chromatogram,
-      DataKind.Metadata,
+      EntityTypeTag.Chromatogram,
+      DataKindTag.Metadata,
+    );
+    if (!blob) return undefined;
+    return ParquetFile.fromFile(blob as any as Blob);
+  }
+
+  async chromatogramPrecursors(): Promise<ParquetFile | undefined> {
+    const blob = await this.openFromIndex(
+      EntityTypeTag.Chromatogram,
+      DataKindTag.Precursors,
+    );
+    if (!blob) return undefined;
+    return ParquetFile.fromFile(blob as any as Blob);
+  }
+
+  async chromatogramSelectedIons(): Promise<ParquetFile | undefined> {
+    const blob = await this.openFromIndex(
+      EntityTypeTag.Chromatogram,
+      DataKindTag.SelectedIons,
+    );
+    if (!blob) return undefined;
+    return ParquetFile.fromFile(blob as any as Blob);
+  }
+
+  async chromatogramProducts(): Promise<ParquetFile | undefined> {
+    const blob = await this.openFromIndex(
+      EntityTypeTag.Chromatogram,
+      DataKindTag.Products,
     );
     if (!blob) return undefined;
     return ParquetFile.fromFile(blob as any as Blob);
@@ -190,8 +354,8 @@ export class ZipStorage<T> {
 
   async chromatogramData(): Promise<ParquetFile | undefined> {
     const blob = await this.openFromIndex(
-      EntityType.Chromatogram,
-      DataKind.DataArrays,
+      EntityTypeTag.Chromatogram,
+      DataKindTag.DataArrays,
     );
     if (!blob) return undefined;
     return ParquetFile.fromFile(blob as any as Blob);
@@ -199,8 +363,17 @@ export class ZipStorage<T> {
 
   async wavelengthSpectrumMetadata(): Promise<ParquetFile | undefined> {
     const blob = await this.openFromIndex(
-      EntityType.WavelengthSpectrum,
-      DataKind.Metadata,
+      EntityTypeTag.WavelengthSpectrum,
+      DataKindTag.Metadata,
+    );
+    if (!blob) return undefined;
+    return ParquetFile.fromFile(blob as any as Blob);
+  }
+
+  async wavelengthSpectrumScans(): Promise<ParquetFile | undefined> {
+    const blob = await this.openFromIndex(
+      EntityTypeTag.WavelengthSpectrum,
+      DataKindTag.Scans,
     );
     if (!blob) return undefined;
     return ParquetFile.fromFile(blob as any as Blob);
@@ -208,8 +381,8 @@ export class ZipStorage<T> {
 
   async wavelengthSpectrumData(): Promise<ParquetFile | undefined> {
     const blob = await this.openFromIndex(
-      EntityType.WavelengthSpectrum,
-      DataKind.DataArrays,
+      EntityTypeTag.WavelengthSpectrum,
+      DataKindTag.DataArrays,
     );
     if (!blob) return undefined;
     return ParquetFile.fromFile(blob as any as Blob);

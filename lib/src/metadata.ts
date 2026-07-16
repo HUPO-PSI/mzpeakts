@@ -6,6 +6,7 @@ import { binarySearch, binarySearchAll, Span1DBigInt } from "./utils";
 import { bigIntToNumber } from "apache-arrow/util/bigint";
 import { SpacingInterpolationModel } from "./data";
 import { Spectrum, Chromatogram, ParamDescribed } from "./record";
+import { DataKindTag, EntityType, EntityTypeTag, FileIndex, FileIndexEntry, ZipStorage } from './store';
 
 const DATA_POINT_COUNT_TERM = "MS_1003060_number_of_data_points";
 const PEAK_COUNT_TERM = "MS_1003059_number_of_peaks";
@@ -315,6 +316,10 @@ export class FileMetadata {
     this.run = run;
   }
 
+  static empty() {
+    return new FileMetadata(new FileDescription([], []), [], [], [], [])
+  }
+
   static fromParquet(handle: ParquetFile) {
     const meta = handle.metadata().fileMetadata().keyValueMetadata();
     let raw = meta.get("file_description");
@@ -348,7 +353,7 @@ export class FileMetadata {
 
 abstract class MetadataReaderBase {
   /** The backing Parquet file */
-  handle: ParquetFile;
+  handle: ParquetTableNamespace;
   /** Whether the {@link init} method has been called, which asynchronously loads data */
   initialized: boolean = false;
   protected _iteratorHelpers: IteratorLookupTables | null = null;
@@ -360,7 +365,7 @@ abstract class MetadataReaderBase {
    *
    * @param handle The Parquet file this reader uses
    */
-  constructor(handle: ParquetFile) {
+  constructor(handle: ParquetTableNamespace) {
     this.handle = handle;
     this.initialized = false;
   }
@@ -437,24 +442,6 @@ abstract class MetadataReaderBase {
   get length(): number {
     return this.initialized && this._mainStruct ? this._mainStruct.length : 0;
   }
-
-  /**
-   * Read the Parquet file completely into memory.
-   * @returns An Arrow {@link Arrow.Table}
-   */
-  protected async readTable() {
-    const tab = await this.handle.read();
-    const ffi = tab.intoFFI();
-    const mem = wasmMemory();
-    const arrowTab = ArrowFFI.parseTable(
-      mem.buffer,
-      ffi.arrayAddrs(),
-      ffi.schemaAddr(),
-      true,
-    );
-    ffi.free();
-    return arrowTab;
-  }
 }
 
 type IteratorLookupTables = Record<string, Map<bigint, HasSourceIndex[]>>;
@@ -502,13 +489,157 @@ const buildBasicRecordTable = <T extends HasSourceIndex>(
   return table;
 };
 
+export class ParquetTableNamespace {
+  fileIndex: FileIndex;
+  entityType: EntityType;
+  metadata: ParquetFile | null = null;
+  scans: ParquetFile | null = null;
+  precursors: ParquetFile | null = null;
+  selectedIons: ParquetFile | null = null;
+  products: ParquetFile | null = null;
+
+  constructor(fileIndex: FileIndex, entityType: EntityType) {
+    this.fileIndex = fileIndex;
+    this.entityType = entityType;
+    this.metadata = null;
+    this.scans = null;
+    this.precursors = null;
+    this.selectedIons = null;
+    this.products = null;
+  }
+
+  hasMetadata() {
+    return this.metadata != null;
+  }
+
+  static async populateFromStorage<T>(
+    storage: ZipStorage<T>,
+    entityType: EntityType | EntityTypeTag,
+  ) {
+    const self = new ParquetTableNamespace(
+      storage.fileIndex,
+      entityType instanceof EntityType
+        ? entityType
+        : EntityType.fromString(entityType),
+    );
+    const filesOf = self.fileIndex.files.filter((f) =>
+      f.entityType.equals(self.entityType),
+    );
+
+    const opener = async (f: FileIndexEntry) => {
+      const handle = await ParquetFile.fromFile(
+        (await storage.openFromIndex(f.entityType, f.dataKind)) as any as Blob,
+      );
+      console.log(f)
+      const vec = await self.readToVector(handle);
+      console.log(vec)
+      return handle;
+    };
+
+    for (let f of filesOf) {
+      switch (`${f.dataKind.tag}`) {
+        case DataKindTag.Metadata:
+          self.metadata = await opener(f);
+          break;
+        case DataKindTag.Scans:
+          self.scans = await opener(f);
+          break;
+        case DataKindTag.Precursors:
+          self.precursors = await opener(f);
+          break;
+        case DataKindTag.SelectedIons:
+          self.selectedIons = await opener(f);
+          break;
+        case DataKindTag.Products:
+          self.products = await opener(f);
+          break;
+        case DataKindTag.DataArrays:
+        case DataKindTag.Peaks:
+          break;
+        case DataKindTag.Proprietary:
+        case DataKindTag.Other:
+        default:
+          console.log("Failed to handle", f);
+      }
+    }
+    return self;
+  }
+
+  async readMetadata() {
+    if (this.metadata) {
+      console.log("Reading metadata")
+      return await this.readToVector(this.metadata);
+    } else {
+      return null;
+    }
+  }
+
+  async readScans() {
+    if (this.scans) {
+      console.log("Reading scans")
+      return await this.readToVector(this.scans);
+    } else {
+      return null;
+    }
+  }
+
+  async readPrecursors() {
+    if (this.precursors) {
+      console.log("Reading precursors")
+      return await this.readToVector(this.precursors);
+    } else {
+      return null;
+    }
+  }
+
+  async readSelectedIons() {
+    if (this.selectedIons) {
+      console.log("Reading selected ions")
+      return await this.readToVector(this.selectedIons);
+    } else {
+      return null;
+    }
+  }
+
+  async readProducts() {
+    if (this.products) {
+      return await this.readToVector(this.products);
+    } else {
+      return null;
+    }
+  }
+
+  /**
+   * Read the Parquet file completely into memory.
+   * @returns An Arrow {@link Arrow.Table}
+   */
+  async readToVector(handle: ParquetFile) {
+    const tab = await handle.read();
+    const ffi = tab.intoFFI();
+    const mem = wasmMemory();
+    const arrowTab = ArrowFFI.parseTable(
+      mem.buffer,
+      ffi.arrayAddrs(),
+      ffi.schemaAddr(),
+      true,
+    );
+    ffi.free();
+    return await tableToVector(arrowTab);
+  }
+}
+
+function tableToVector<T extends Arrow.TypeMap>(records: Arrow.Table<T>) : Arrow.Vector<Arrow.Struct> {
+  console.log(records);
+  return Arrow.makeVector(records.data)
+}
+
 export class SpectrumMetadata extends MetadataReaderBase {
   _spectra: Arrow.Vector<Arrow.Struct> | null;
   _scans: Arrow.Vector<Arrow.Struct> | null;
   _precursors: Arrow.Vector<Arrow.Struct> | null;
   _selectedIons: Arrow.Vector<Arrow.Struct> | null;
 
-  constructor(handle: ParquetFile) {
+  constructor(handle: ParquetTableNamespace) {
     super(handle);
     this._spectra = null;
     this._scans = null;
@@ -564,10 +695,13 @@ export class SpectrumMetadata extends MetadataReaderBase {
    * @returns {FileMetadata} The run level metadata
    */
   fileMetadata() {
-    return FileMetadata.fromParquet(this.handle);
+    if (this.handle.metadata)
+      return FileMetadata.fromParquet(this.handle.metadata);
+    else
+      return FileMetadata.empty()
   }
 
-  static async fromParquet(handle: ParquetFile) {
+  static async fromNamespace(handle: ParquetTableNamespace) {
     const self = new this(handle);
     return await self.init();
   }
@@ -592,19 +726,11 @@ export class SpectrumMetadata extends MetadataReaderBase {
 
   async init() {
     if (this.initialized) return this;
-    const arrowTab = await this.readTable();
-    this._spectra = arrowTab.getChild(
-      "spectrum",
-    ) as Arrow.Vector<Arrow.Struct> | null;
-    this._scans = arrowTab.getChild(
-      "scan",
-    ) as Arrow.Vector<Arrow.Struct> | null;
-    this._precursors = arrowTab.getChild(
-      "precursor",
-    ) as Arrow.Vector<Arrow.Struct> | null;
-    this._selectedIons = arrowTab.getChild(
-      "selected_ion",
-    ) as Arrow.Vector<Arrow.Struct> | null;
+
+    this._spectra = await this.handle.readMetadata();
+    this._scans = await this.handle.readScans()
+    this._precursors = await this.handle.readPrecursors()
+    this._selectedIons = await this.handle.readSelectedIons();
     this.initialized = true;
     return this;
   }
@@ -751,7 +877,12 @@ export class ChromatogramMetadata extends MetadataReaderBase {
   _precursors: Arrow.Vector | null;
   _selectedIons: Arrow.Vector | null;
 
-  constructor(handle: ParquetFile) {
+  static async fromNamespace(handle: ParquetTableNamespace) {
+    const self = new this(handle);
+    return await self.init();
+  }
+
+  constructor(handle: ParquetTableNamespace) {
     super(handle);
     this._chromatograms = null;
     this._precursors = null;
@@ -769,17 +900,11 @@ export class ChromatogramMetadata extends MetadataReaderBase {
     return lookups;
   }
 
-  static async fromParquet(handle: ParquetFile) {
-    const self = new this(handle);
-    return await self.init();
-  }
-
   async init() {
     if (this.initialized) return this;
-    const arrowTab = await this.readTable();
-    this._chromatograms = arrowTab.getChild("chromatogram");
-    this._precursors = arrowTab.getChild("precursor");
-    this._selectedIons = arrowTab.getChild("selected_ion");
+    this._chromatograms = await this.handle.readMetadata();
+    this._precursors = await this.handle.readPrecursors();
+    this._selectedIons = await this.handle.readSelectedIons();
     this.initialized = true;
     return this;
   }

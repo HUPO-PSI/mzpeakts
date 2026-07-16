@@ -1,9 +1,10 @@
 import * as Arrow from "apache-arrow";
-import { ZipStorage } from "./store";
+import { EntityTypeTag, ZipStorage } from "./store";
 import {
   SpectrumMetadata,
   ChromatogramMetadata,
   FileMetadata,
+  ParquetTableNamespace,
 } from "./metadata";
 import { HttpRangeReader, BlobReader } from "@zip.js/zip.js";
 import {
@@ -101,23 +102,28 @@ export class MzPeakReader<T> implements AsyncIterable<Spectrum> {
   async init() {
     if (this.initialized) return this;
     await this.store.init();
-    const spectrumMetaHandle = await this.store.spectrumMetadata();
-    if (spectrumMetaHandle) {
+    console.log("Loading spectrum metadata")
+    const spectrumMetaHandle = await this.store.openMetadataNamespace(
+      EntityTypeTag.Spectrum,
+    );
+    console.log(spectrumMetaHandle);
+    if (spectrumMetaHandle.hasMetadata()) {
       this.spectrumMetadata =
-        await SpectrumMetadata.fromParquet(spectrumMetaHandle);
+        await SpectrumMetadata.fromNamespace(spectrumMetaHandle);
     }
 
-    const chromatogramMetaHandle = await this.store.chromatogramMetadata();
-    if (chromatogramMetaHandle) {
-      this.chromatogramMetadata = await ChromatogramMetadata.fromParquet(
+    const chromatogramMetaHandle = await this.store.openMetadataNamespace(
+      EntityTypeTag.Chromatogram
+    );
+    if (chromatogramMetaHandle.hasMetadata()) {
+      this.chromatogramMetadata = await ChromatogramMetadata.fromNamespace(
         chromatogramMetaHandle,
       );
     }
 
-    const wavelengthMetadataHandle =
-      await this.store.wavelengthSpectrumMetadata();
+    const wavelengthMetadataHandle = await this.store.openMetadataNamespace(EntityTypeTag.WavelengthSpectrum)
     if (wavelengthMetadataHandle) {
-      this.wavelengthMetadata = await SpectrumMetadata.fromParquet(
+      this.wavelengthMetadata = await SpectrumMetadata.fromNamespace(
         wavelengthMetadataHandle,
       );
     }
