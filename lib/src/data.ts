@@ -85,24 +85,29 @@ async function* streamArrowBatches(
   const options = options_ ?? { batchSize: 2048 };
   options.rowGroups = rowGroups;
   if (columns) options.columns = columns;
-  const tabStream = (await handle.stream(options)).values();
+  // Use getReader() instead of ReadableStream.values() — values() requires Safari 16.4+
+  // but WKWebView on older macOS lacks it. getReader() is universally available.
+  const reader = (await handle.stream(options)).getReader();
   const mem = wasmMemory();
-  while (true) {
-    let batch = await tabStream.next();
-    if (batch.done) break;
-    let wBatch = batch.value;
-    if (wBatch) {
-      let ffi = wBatch.intoFFI();
-      let arrowBat = ArrowFFI.parseRecordBatch(
-        mem.buffer,
-        ffi.arrayAddr(),
-        ffi.schemaAddr(),
-        true,
-      );
-      ffi.free();
+  try {
+    while (true) {
+      const { done, value: wBatch } = await reader.read();
+      if (done) break;
+      if (wBatch) {
+        let ffi = wBatch.intoFFI();
+        let arrowBat = ArrowFFI.parseRecordBatch(
+          mem.buffer,
+          ffi.arrayAddr(),
+          ffi.schemaAddr(),
+          true,
+        );
+        ffi.free();
 
-      yield arrowBat;
+        yield arrowBat;
+      }
     }
+  } finally {
+    reader.releaseLock();
   }
 }
 
@@ -527,20 +532,27 @@ export class DataArraysReaderMeta {
 
   findPageFor(index: bigint): { offset: number; limit: number | null } | null {
     if (!this.pageKeyIndex) return null;
-    let start = null;
+    let start: number | null = null;
+    let end: number | null = null;
     for (let page of this.pageKeyIndex) {
       const min = page.min;
       const max = page.max;
       if (min == undefined || max == undefined) continue;
-      if (min <= index && max >= index && start == null) {
-        start = page.start_row;
-      }
-      if (min > index && start != null) {
-        const limit = (page.start_row ?? 0) - (start ?? 0);
-        return { offset: start, limit: limit == 0 ? null : limit };
+      if (min <= index && max >= index) {
+        // Page(s) whose key range contains `index`.
+        if (start == null) start = page.start_row;
+        if (page.end_row != null) end = page.end_row;
+      } else if (start != null) {
+        // First page past the containing range (pages are key-sorted) → stop.
+        break;
       }
     }
-    return null;
+    if (start == null) return null;
+    // `limit` = rows spanned by the containing page(s), from the page's OWN end_row.
+    // The previous code used the NEXT page's start_row, which resets per row group and so
+    // produced a NEGATIVE limit at row-group boundaries (parquet-wasm: "expected usize").
+    const limit = end != null && end > start ? end - start : null;
+    return { offset: start, limit };
   }
 
   findPageForRange(startIdx: bigint, endIdx: bigint) {
