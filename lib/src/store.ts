@@ -9,9 +9,11 @@ setPanicHook();
 
 const SPECTRUM = "spectrum";
 const CHROMATOGRAM = "chromatogram";
-const WAVELENGTH_SPECTRUM = "wavelength_spectrum";
+// Space-separated, per the spec (schema/mzpeak_index.json) and every file the reference
+// writer emits — NOT "wavelength_spectrum"/"data_arrays".
+const WAVELENGTH_SPECTRUM = "wavelength spectrum";
 
-const DATA_ARRAYS = "data_arrays";
+const DATA_ARRAYS = "data arrays";
 const METADATA = "metadata";
 const PEAKS = "peaks";
 const OTHER = "other";
@@ -53,8 +55,12 @@ export class DataKind {
   }
 
   static fromString(key: string) {
-    const maybe: string | undefined = (<any>DataKindTag)[key];
-    const tag: DataKindTag = maybe == undefined ? DataKindTag.Other : (<any>DataKindTag)[maybe];
+    // Match on the enum's VALUE, not its key name. TypeScript string enums have no reverse
+    // mapping, so `DataKindTag[key]` is always undefined for an index value like "metadata"
+    // (the key is `Metadata`) — which made every entry fall back to `Other`.
+    const tag: DataKindTag = (Object.values(DataKindTag) as string[]).includes(key)
+      ? (key as DataKindTag)
+      : DataKindTag.Other;
     return new DataKind(key, tag);
   }
 }
@@ -87,8 +93,10 @@ export class EntityType {
   }
 
   static fromString(key: string) {
-    const maybe: EntityTypeTag | undefined = (<any>EntityTypeTag)[key]
-    const tag: EntityTypeTag = maybe == undefined ? EntityTypeTag.Other : (<any>EntityTypeTag)[maybe];
+    // Same fix as DataKind.fromString: match the enum VALUE, not the key name.
+    const tag: EntityTypeTag = (Object.values(EntityTypeTag) as string[]).includes(key)
+      ? (key as EntityTypeTag)
+      : EntityTypeTag.Other;
     return new EntityType(key, tag)
   }
 }
