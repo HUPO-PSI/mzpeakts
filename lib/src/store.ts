@@ -107,6 +107,10 @@ export class MetadataColumn {
     this.unit = unit
   }
 
+  param(value: any | null) {
+    return new Param(this.name, value, this.accession, this.unit)
+  }
+
   get leaf() {
     return this.path[this.path.length - 1];
   }

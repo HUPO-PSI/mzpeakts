@@ -4,7 +4,6 @@ import {
   SpectrumMetadata,
   ChromatogramMetadata,
   FileMetadata,
-  ParquetTableNamespace,
 } from "./metadata";
 import { HttpRangeReader, BlobReader } from "@zip.js/zip.js";
 import {
@@ -102,11 +101,9 @@ export class MzPeakReader<T> implements AsyncIterable<Spectrum> {
   async init() {
     if (this.initialized) return this;
     await this.store.init();
-    console.log("Loading spectrum metadata")
     const spectrumMetaHandle = await this.store.openMetadataNamespace(
       EntityTypeTag.Spectrum,
     );
-    console.log(spectrumMetaHandle);
     if (spectrumMetaHandle.hasMetadata()) {
       this.spectrumMetadata =
         await SpectrumMetadata.fromNamespace(spectrumMetaHandle);

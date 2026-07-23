@@ -1,15 +1,60 @@
 import * as Arrow from "apache-arrow";
 import * as ArrowFFI from "arrow-js-ffi";
-import { ParquetFile, wasmMemory } from "parquet-wasm";
+import { ParquetFile, wasmMemory, FFIStream } from "parquet-wasm";
 
 import { binarySearch, binarySearchAll, Span1DBigInt } from "./utils";
 import { bigIntToNumber } from "apache-arrow/util/bigint";
 import { SpacingInterpolationModel } from "./data";
-import { Spectrum, Chromatogram, ParamDescribed } from "./record";
-import { DataKindTag, EntityType, EntityTypeTag, FileIndex, FileIndexEntry, ZipStorage } from './store';
+import {
+  Spectrum,
+  ParamDescribed,
+  MetadataTree,
+  SpectrumBuilder,
+  ScanBuilder,
+  SelectedIonBuilder,
+  ChromatogramBuilder,
+  PrecursorBuilder,
+} from "./record";
+import {
+  DataKindTag,
+  EntityType,
+  EntityTypeTag,
+  FileIndex,
+  FileIndexEntry,
+  ZipStorage,
+  DataKind,
+  MetadataColumn,
+} from "./store";
 
-const DATA_POINT_COUNT_TERM = "MS_1003060_number_of_data_points";
-const PEAK_COUNT_TERM = "MS_1003059_number_of_peaks";
+const DATA_POINT_COUNT_TERM = "number_of_data_points";
+const PEAK_COUNT_TERM = "number_of_peaks";
+
+function emptyStructVecFrom(type: Arrow.Struct) {
+  return Arrow.makeVector(Arrow.makeData({ type }));
+}
+
+/**
+ * Convert a WASM FFI stream of Arrow data into a JavaScript Arrow.Vector<Struct> instance, circumventing certain
+ * compatibility breakdowns from the LargeList support shim in `arrow-js-ffi`.
+ *
+ * @param ffi A WASM FFIStream owning the underlying Arrow data in an exportable format. It will be destroyed by this call!
+ */
+export function wasmArrowToArrowJS(ffi: FFIStream): Arrow.Vector<Arrow.Struct> {
+  const mem = wasmMemory();
+  const schema = ArrowFFI.parseSchema(mem.buffer, ffi.schemaAddr());
+  const dtype = new Arrow.Struct(schema.fields);
+  const chunks = [];
+  for (let i = 0; i < ffi.numArrays(); i++) {
+    const ptr = ffi.arrayAddr(i);
+    const structData = ArrowFFI.parseData(mem.buffer, ptr, dtype, true);
+    chunks.push(Arrow.makeVector(structData));
+  }
+  ffi.drop();
+
+  if (chunks.length == 0) return emptyStructVecFrom(dtype);
+  else if (chunks.length == 1) return chunks[0];
+  else return chunks[0].concat(...chunks.slice(1));
+}
 
 export class ParamColumnSpec {
   source: string;
@@ -79,7 +124,7 @@ export class Param {
   }
 
   static fromArrow(array: Arrow.Vector | null | undefined) {
-    if (!array) return []
+    if (!array) return [];
     const names = array.getChild("name") as Arrow.Vector<Arrow.Utf8>;
     const accessions = array.getChild("accession") as Arrow.Vector<Arrow.Utf8>;
     const units = array.getChild("unit") as Arrow.Vector<Arrow.Utf8>;
@@ -317,7 +362,7 @@ export class FileMetadata {
   }
 
   static empty() {
-    return new FileMetadata(new FileDescription([], []), [], [], [], [])
+    return new FileMetadata(new FileDescription([], []), [], [], [], []);
   }
 
   static fromParquet(handle: ParquetFile) {
@@ -354,9 +399,9 @@ export class FileMetadata {
 abstract class MetadataReaderBase {
   /** The backing Parquet file */
   handle: ParquetTableNamespace;
+  metadataTrees: Map<string, MetadataTree>;
   /** Whether the {@link init} method has been called, which asynchronously loads data */
   initialized: boolean = false;
-  protected _iteratorHelpers: IteratorLookupTables | null = null;
 
   /**
    * The basic constructor for {@link MetadataReaderBase} instances. This does not
@@ -367,10 +412,16 @@ abstract class MetadataReaderBase {
    */
   constructor(handle: ParquetTableNamespace) {
     this.handle = handle;
+    this.metadataTrees = new Map();
+    for (let [k, v] of handle.metadataMap()) {
+      this.metadataTrees.set(k, MetadataTree.fromMetadataMap(v));
+    }
     this.initialized = false;
   }
 
-  abstract makeIteratorHelpers(): IteratorLookupTables;
+  mappingsFor(kind: string) {
+    return this.metadataTrees.get(kind);
+  }
 
   protected get _mainStruct(): Arrow.Vector<Arrow.Struct> | null {
     throw new Error("Most override");
@@ -444,50 +495,6 @@ abstract class MetadataReaderBase {
   }
 }
 
-type IteratorLookupTables = Record<string, Map<bigint, HasSourceIndex[]>>;
-
-interface HasSourceIndex {
-  source_index: bigint | null;
-  parameters?: Arrow.Vector | Param[];
-}
-
-const coerceToBasicRecordInTable = <T extends HasSourceIndex>(
-  table: Map<bigint, T[]>,
-  rec: T | undefined,
-) => {
-  if (
-    rec === undefined ||
-    rec.source_index === undefined ||
-    rec.source_index === null
-  )
-    return;
-  const c = table.get(rec.source_index as bigint);
-  if (rec.parameters != undefined) {
-    rec.parameters = Param.fromArrow(rec.parameters as Arrow.Vector);
-  }
-  if (c == undefined || c == null) {
-    table.set(rec.source_index, [rec]);
-  } else {
-    c.push(rec);
-  }
-};
-
-const buildBasicRecordTable = <T extends HasSourceIndex>(
-  array: Arrow.Vector<Arrow.Struct>,
-  convert?: Function,
-): Map<bigint, T[]> => {
-  const table = new Map();
-  for (let i = 0; i < array.length; i++) {
-    if (array.isValid(i)) {
-      let rec = array.get(i)?.toJSON() as HasSourceIndex | undefined;
-      if (convert != undefined) {
-        rec = convert(rec);
-      }
-      coerceToBasicRecordInTable(table, rec);
-    }
-  }
-  return table;
-};
 
 export class ParquetTableNamespace {
   fileIndex: FileIndex;
@@ -530,9 +537,6 @@ export class ParquetTableNamespace {
       const handle = await ParquetFile.fromFile(
         (await storage.openFromIndex(f.entityType, f.dataKind)) as any as Blob,
       );
-      console.log(f)
-      const vec = await self.readToVector(handle);
-      console.log(vec)
       return handle;
     };
 
@@ -565,9 +569,31 @@ export class ParquetTableNamespace {
     return self;
   }
 
+  indexEntry(dataKind: DataKind | DataKindTag) {
+    const hits = this.fileIndex.files.filter(
+      (e) =>
+        e.dataKind.equals(dataKind) && e.entityType.equals(this.entityType),
+    );
+    return hits.length ? null : hits[0];
+  }
+
+  metadataMap(): Map<string, MetadataColumn[]> {
+    const result = new Map();
+    this.fileIndex.files
+      .filter(
+        (e) =>
+          e.entityType.equals(this.entityType) &&
+          e.column_mapping &&
+          e.column_mapping.length > 0,
+      )
+      .forEach((e) => {
+        result.set(e.dataKind.name, e.column_mapping);
+      });
+    return result;
+  }
+
   async readMetadata() {
     if (this.metadata) {
-      console.log("Reading metadata")
       return await this.readToVector(this.metadata);
     } else {
       return null;
@@ -576,7 +602,6 @@ export class ParquetTableNamespace {
 
   async readScans() {
     if (this.scans) {
-      console.log("Reading scans")
       return await this.readToVector(this.scans);
     } else {
       return null;
@@ -585,7 +610,6 @@ export class ParquetTableNamespace {
 
   async readPrecursors() {
     if (this.precursors) {
-      console.log("Reading precursors")
       return await this.readToVector(this.precursors);
     } else {
       return null;
@@ -594,7 +618,6 @@ export class ParquetTableNamespace {
 
   async readSelectedIons() {
     if (this.selectedIons) {
-      console.log("Reading selected ions")
       return await this.readToVector(this.selectedIons);
     } else {
       return null;
@@ -616,21 +639,8 @@ export class ParquetTableNamespace {
   async readToVector(handle: ParquetFile) {
     const tab = await handle.read();
     const ffi = tab.intoFFI();
-    const mem = wasmMemory();
-    const arrowTab = ArrowFFI.parseTable(
-      mem.buffer,
-      ffi.arrayAddrs(),
-      ffi.schemaAddr(),
-      true,
-    );
-    ffi.free();
-    return await tableToVector(arrowTab);
+    return wasmArrowToArrowJS(ffi);
   }
-}
-
-function tableToVector<T extends Arrow.TypeMap>(records: Arrow.Table<T>) : Arrow.Vector<Arrow.Struct> {
-  console.log(records);
-  return Arrow.makeVector(records.data)
 }
 
 export class SpectrumMetadata extends MetadataReaderBase {
@@ -697,8 +707,7 @@ export class SpectrumMetadata extends MetadataReaderBase {
   fileMetadata() {
     if (this.handle.metadata)
       return FileMetadata.fromParquet(this.handle.metadata);
-    else
-      return FileMetadata.empty()
+    else return FileMetadata.empty();
   }
 
   static async fromNamespace(handle: ParquetTableNamespace) {
@@ -706,19 +715,6 @@ export class SpectrumMetadata extends MetadataReaderBase {
     return await self.init();
   }
 
-  makeIteratorHelpers(): IteratorLookupTables {
-    const lookups: IteratorLookupTables = {};
-    if (this.scans) {
-      lookups["scans"] = buildBasicRecordTable(this.scans);
-    }
-    if (this.precursors) {
-      lookups["precursors"] = buildBasicRecordTable(this.precursors);
-    }
-    if (this.selectedIons) {
-      lookups["selectedIons"] = buildBasicRecordTable(this.selectedIons);
-    }
-    return lookups;
-  }
 
   protected get _mainStruct() {
     return this._spectra;
@@ -728,8 +724,8 @@ export class SpectrumMetadata extends MetadataReaderBase {
     if (this.initialized) return this;
 
     this._spectra = await this.handle.readMetadata();
-    this._scans = await this.handle.readScans()
-    this._precursors = await this.handle.readPrecursors()
+    this._scans = await this.handle.readScans();
+    this._precursors = await this.handle.readPrecursors();
     this._selectedIons = await this.handle.readSelectedIons();
     this.initialized = true;
     return this;
@@ -788,7 +784,7 @@ export class SpectrumMetadata extends MetadataReaderBase {
    * @param index The index of the spectrum to read out
    * @returns The metadata record for a {@coderef Spectrum}
    */
-  get(index: number | bigint) : Spectrum {
+  get(index: number | bigint): Spectrum {
     if (index >= this.length) throw new Error("Index out of range");
     let index_ = bigIntToNumber(index);
     let index_n = BigInt(index);
@@ -802,73 +798,65 @@ export class SpectrumMetadata extends MetadataReaderBase {
       const offset = binarySearch(indexArr, index_n);
       row = indexArr.get(offset);
     }
-    const spectrumRecord = this.spectra.get(index_)?.toJSON();
+
+    let tree = this.metadataTrees.get(DataKindTag.Metadata);
+    if (!tree) tree = MetadataTree.fromMetadataMap([]);
+    let builder = new SpectrumBuilder(tree);
+    const spectrumRecord = builder
+      .visit(this.spectra.slice(index_, index_ + 1))
+      .finish()[0];
+
     if (!spectrumRecord)
       throw new Error("Invalid state, spectrum record not found");
-    spectrumRecord.parameters = Param.fromArrow(spectrumRecord.parameters);
-    const auxArraysCount = spectrumRecord.auxiliary_arrays?.length || 0;
-    let auxiliaryArrays = null
-    if (auxArraysCount > 0) {
-      auxiliaryArrays = AuxiliaryArrayDecoder.decode(
-        spectrumRecord.auxiliary_arrays,
-      );
-    }
     indexArr = this.scans?.getChild(
       "source_index",
     ) as Arrow.Vector<Arrow.Uint64>;
     let offsets = binarySearchAll(indexArr, index_n);
 
     if (offsets && this.scans) {
-      const scanRecords = Array.from(
-        this.scans.slice(offsets[0], offsets[1]),
-      ).map((e) => {
-        if (!e) return e;
-        const conv = e.toJSON();
-        conv.parameters = Param.fromArrow(conv.parameters);
-        return conv;
-      });
-      spectrumRecord.scans = scanRecords;
+      const scanCols =
+        this.metadataTrees.get(DataKindTag.Scans) ?? MetadataTree.empty();
+      const builder = new ScanBuilder(scanCols);
+      spectrumRecord.scans = builder
+        .visit(this.scans.slice(offsets[0], offsets[1]))
+        .finish()
+        .filter((v) => v != null);
     }
 
     if (this.precursors != null) {
       indexArr = this.precursors?.getChild(
         "source_index",
       ) as Arrow.Vector<Arrow.Uint64>;
+      const precursorCols =
+        this.metadataTrees.get(DataKindTag.Precursors) ?? MetadataTree.empty();
+      const precursorBuilder = new PrecursorBuilder(precursorCols);
       offsets = binarySearchAll(indexArr, index_n);
       if (offsets) {
         const precursorRecords = this.precursors.slice(offsets[0], offsets[1]);
-        spectrumRecord.precursors = Array.from(precursorRecords).map((e) => {
-          if (!e) return e;
-          const conv = e.toJSON();
-          conv.isolation_window = conv.isolation_window.toJSON();
-          conv.activation = conv.activation.toJSON();
-          conv.activation.parameters = Param.fromArrow(
-            conv.activation.parameters,
-          );
-          return conv;
-        });
+        spectrumRecord.precursors = precursorBuilder
+          .visit(precursorRecords)
+          .finish()
+          .filter((v) => v != null);
       }
     }
 
     if (this.selectedIons != null) {
-      indexArr = this.selectedIons?.getChild(
+      indexArr = this.selectedIons.getChild(
         "source_index",
       ) as Arrow.Vector<Arrow.Uint64>;
       offsets = binarySearchAll(indexArr, index_n);
       if (offsets) {
-        const ionRecords = this.selectedIons
-          .slice(offsets[0], offsets[1])
-          .toJSON();
-        spectrumRecord.selectedIons = Array.from(ionRecords).map((e) => {
-          if (!e) return e;
-          const conv = e.toJSON();
-          conv.parameters = Param.fromArrow(conv.parameters);
-          return conv;
-        });
+        const selectedIonCols =
+          this.metadataTrees.get(DataKindTag.SelectedIons) ??
+          MetadataTree.empty();
+        spectrumRecord.selectedIons = new SelectedIonBuilder(selectedIonCols)
+          .visit(this.selectedIons.slice(offsets[0], offsets[1]))
+          .finish()
+          .filter((v) => v != null);
       }
     }
 
-    return Spectrum.fromRecord(spectrumRecord, auxiliaryArrays);
+    return spectrumRecord;
   }
 }
 
@@ -887,17 +875,6 @@ export class ChromatogramMetadata extends MetadataReaderBase {
     this._chromatograms = null;
     this._precursors = null;
     this._selectedIons = null;
-  }
-
-  makeIteratorHelpers(): IteratorLookupTables {
-    const lookups: IteratorLookupTables = {};
-    if (this.precursors) {
-      lookups["precursors"] = buildBasicRecordTable(this.precursors);
-    }
-    if (this.selectedIons) {
-      lookups["selectedIons"] = buildBasicRecordTable(this.selectedIons);
-    }
-    return lookups;
   }
 
   async init() {
@@ -949,17 +926,15 @@ export class ChromatogramMetadata extends MetadataReaderBase {
     if (row != BigInt(index)) {
       index_ = binarySearch(indexArr, BigInt(index));
     }
-    const chromatogramRecord = this.chromatograms.get(index_)?.toJSON();
-    chromatogramRecord.parameters = Param.fromArrow(
-      chromatogramRecord.parameters,
-    );
-    const auxArraysCount = chromatogramRecord.auxiliary_arrays?.length || 0;
-    let auxiliaryArrays = null;
-    if (auxArraysCount > 0) {
-      auxiliaryArrays = AuxiliaryArrayDecoder.decode(
-        chromatogramRecord.auxiliary_arrays,
-      );
-    }
+
+    let tree = this.metadataTrees.get(DataKindTag.Metadata);
+    if (!tree) tree = MetadataTree.fromMetadataMap([]);
+    let builder = new ChromatogramBuilder(tree);
+    const chromatogramRecord = builder
+      .visit(this.chromatograms.slice(index_, index_ + 1))
+      .finish()[0];
+    if (!chromatogramRecord)
+      throw new Error("Invalid state, chromatogram record not found");
 
     if (this.precursors != null) {
       indexArr = this.precursors?.getChild(
@@ -968,43 +943,37 @@ export class ChromatogramMetadata extends MetadataReaderBase {
       let offsets = binarySearchAll(indexArr, index_n);
       if (offsets) {
         const precursorRecords = this.precursors.slice(offsets[0], offsets[1]);
-        chromatogramRecord.precursors = Array.from(precursorRecords).map(
-          (e) => {
-            if (!e) return e;
-            const conv = e.toJSON();
-            conv.isolation_window = conv.isolation_window.toJSON();
-            conv.activation = conv.activation.toJSON();
-            conv.activation.parameters = Param.fromArrow(
-              conv.activation.parameters,
-            );
-            return conv;
-          },
-        );
+        chromatogramRecord.precursors = new PrecursorBuilder(
+          this.metadataTrees.get(DataKindTag.Precursors) ??
+            MetadataTree.empty(),
+        )
+          .visit(precursorRecords)
+          .finish()
+          .filter((v) => v != null);
       }
     }
 
     if (this.selectedIons != null) {
-      indexArr = this.selectedIons?.getChild(
+      indexArr = this.selectedIons.getChild(
         "source_index",
       ) as Arrow.Vector<Arrow.Uint64>;
       let offsets = binarySearchAll(indexArr, index_n);
       if (offsets) {
-        const ionRecords = this.selectedIons
-          .slice(offsets[0], offsets[1])
-          .toJSON();
-        chromatogramRecord.selectedIons = Array.from(ionRecords).map((e) => {
-          if (!e) return e;
-          const conv = e.toJSON();
-          conv.parameters = Param.fromArrow(conv.parameters);
-          return conv;
-        });
+        const selectedIonCols =
+          this.metadataTrees.get(DataKindTag.SelectedIons) ??
+          MetadataTree.empty();
+        chromatogramRecord.selectedIons = new SelectedIonBuilder(
+          selectedIonCols,
+        )
+          .visit(this.selectedIons.slice(offsets[0], offsets[1]))
+          .finish()
+          .filter((v) => v != null);
       }
     }
 
-    return Chromatogram.fromRecord(chromatogramRecord, auxiliaryArrays);
+    return chromatogramRecord;
   }
 }
-
 
 export class AuxiliaryArray {
   name: string;
@@ -1024,7 +993,6 @@ export class AuxiliaryArray {
     this.unit = unit;
   }
 }
-
 
 export class AuxiliaryArrayDecoder {
   static ArrayTypes: Record<
@@ -1066,8 +1034,8 @@ export class AuxiliaryArrayDecoder {
       if (arrayType) {
         values = new arrayType(buf.buffer);
       } else if (record.data_type == AuxiliaryArrayDecoder.StringType) {
-        const decoder = new TextDecoder('utf8');
-        values = decoder.decode(buf.buffer).split("\0")
+        const decoder = new TextDecoder("utf8");
+        values = decoder.decode(buf.buffer).split("\0");
       } else {
         throw Error(`Data type ${record.data_type} not implemented`);
       }

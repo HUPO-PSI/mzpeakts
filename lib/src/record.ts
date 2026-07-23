@@ -1,9 +1,727 @@
 import { DataArrays } from "./data";
-import { AuxiliaryArray, Param, ParamColumnSpec } from "./metadata";
+import {
+  AuxiliaryArray,
+  Param,
+  AuxiliaryArrayDecoder,
+} from "./metadata";
+import { MetadataColumn } from "./store";
+import * as Arrow from "apache-arrow";
+
+export class MetadataTree {
+  prefix: string[];
+  columns: Map<string, MetadataColumn>;
+  children: Map<string, MetadataTree>;
+
+  constructor(
+    prefix: string[],
+    columns: Map<string, MetadataColumn>,
+    children: Map<string, MetadataTree>,
+  ) {
+    this.prefix = prefix;
+    this.columns = columns;
+    this.children = children;
+  }
+
+  mapColumn(name: string) {
+    return this.columns.get(name);
+  }
+
+  mapChild(name: string) {
+    return this.children.get(name);
+  }
+
+  static empty() {
+    return MetadataTree.fromMetadataMap([]);
+  }
+
+  static fromMetadataMap(columns: MetadataColumn[]) {
+    const nodes = new Map<string, MetadataColumn[]>();
+
+    for (let i = 0; i < columns.length; i++) {
+      const col = columns[i];
+      const path = col.path.slice(0, col.path.length - 1).join(".");
+      const members = nodes.get(path);
+      if (!members) {
+        nodes.set(path, [col]);
+      } else {
+        members.push(col);
+      }
+    }
+    const nodesSorted = Array.from(nodes.entries()).sort();
+    const root = new MetadataTree([], new Map(), new Map());
+    for (let i = 0; i < nodesSorted.length; i++) {
+      const [k, v] = nodesSorted[i];
+      let node = root;
+      const path = k.split(".").filter((c) => c != "");
+      for (let j = 0; j < path.length; j++) {
+        let tmp = node.children.get(path[j]);
+        if (tmp) {
+          node = tmp;
+        } else {
+          tmp = new MetadataTree(path.slice(0, j), new Map(), new Map());
+          node.children.set(path[j], tmp);
+          node = tmp;
+        }
+      }
+      v.forEach((c) => {
+        node.columns.set(c.leaf, c);
+      });
+    }
+    return root;
+  }
+}
+
+abstract class RecordVisitor<T extends ParamDescribed> {
+  members: (T | null)[];
+  mapping: MetadataTree;
+
+  constructor(mapping: MetadataTree) {
+    this.members = [];
+    this.mapping = mapping;
+  }
+
+  abstract visit(array: Arrow.Vector<Arrow.Struct>): ThisType<this>;
+
+  finish(): (T | null)[] {
+    return this.members;
+  }
+
+  visitParameters(colArray: Arrow.Vector) {
+    for (let j = 0; j < colArray.length; j++) {
+      const val = colArray.at(j);
+      const member = this.members[j];
+      if (val && member) member.parameters.push(...Param.fromArrow(val));
+    }
+  }
+
+  visitAsParameter(colArray: Arrow.Vector, metaCol: MetadataColumn) {
+    for (let j = 0; j < colArray.length; j++) {
+      const val = colArray.at(j);
+      const member = this.members[j];
+      if (val && member) member.parameters.push(metaCol.param(val));
+    }
+  }
+}
+
+abstract class RecordHasIonMobilityVisitor<
+  T extends HasIonMobility,
+> extends RecordVisitor<T> {
+  constructor(mapping: MetadataTree) {
+    super(mapping);
+  }
+
+  visitIonMobilityValue(colArray: Arrow.Vector) {
+    for (let j = 0; j < colArray.length; j++) {
+      const val = colArray.at(j) as number | null;
+      const member = this.members[j];
+      if (val && member) member.ionMobilityValue = val;
+    }
+  }
+
+  visitIonMobilityType(colArray: Arrow.Vector) {
+    for (let j = 0; j < colArray.length; j++) {
+      const val = colArray.at(j) as string | null;
+      const member = this.members[j];
+      if (val && member) member.ionMobilityType = val;
+    }
+  }
+}
+
+export class PrecursorBuilder extends RecordVisitor<Precursor> {
+  constructor(mapping: MetadataTree) {
+    super(mapping);
+  }
+
+  visitIndex(
+    sourceIndex: Arrow.Vector<Arrow.Uint64>,
+    precursorIndex: Arrow.Vector<Arrow.Uint64>,
+  ) {
+    for (let i = 0; i < sourceIndex?.length; i++) {
+      this.members.push(
+        sourceIndex.isValid(i)
+          ? new Precursor(
+              sourceIndex.at(i) as bigint,
+              precursorIndex.at(i) as bigint,
+              new Activation([]),
+              new IsolationWindow(0, 0, 0),
+              ""
+            )
+          : null,
+      );
+    }
+  }
+
+  visitActivation(array: Arrow.Vector<Arrow.Struct>, mapping: MetadataTree) {
+    for (let i = 0; i < array.type.children.length; i++) {
+      const field = array.type.children[i];
+      const colArray = array.getChildAt(i);
+      const metaCol = mapping.mapColumn(field.name);
+      if (!colArray) continue;
+      if (metaCol) {
+        switch (metaCol.accession) {
+          default:
+            this.visitAsParameter(colArray, metaCol);
+        }
+        continue;
+      }
+
+      switch (field.name) {
+        case "parameters":
+          for (let j = 0; j < colArray.length; j++) {
+            const val = colArray.at(j);
+            const member = this.members[j];
+            if (val && member)
+              member.activation.parameters.push(...Param.fromArrow(val));
+          }
+          break;
+        default:
+      }
+    }
+  }
+
+  visitIsolationWindow(
+    array: Arrow.Vector<Arrow.Struct>,
+    mapping: MetadataTree,
+  ) {
+    for (let i = 0; i < array.type.children.length; i++) {
+      const field = array.type.children[i];
+      const colArray = array.getChildAt(i);
+      if (!colArray) continue;
+
+      const metaCol = mapping.mapColumn(field.name);
+      if (metaCol) {
+        switch (metaCol.accession) {
+          case "MS:1000827":
+            for (let j = 0; j < colArray.length; j++) {
+              const val = colArray.at(j) as number | null;
+              const member = this.members[j];
+              if (val && member?.isolationWindow)
+                member.isolationWindow.target = val;
+            }
+            break;
+          case "MS:1000828":
+            for (let j = 0; j < colArray.length; j++) {
+              const val = colArray.at(j) as number | null;
+              const member = this.members[j];
+              if (val && member?.isolationWindow)
+                member.isolationWindow.lowerOffset = val;
+            }
+            break;
+          case "MS:1000829":
+            for (let j = 0; j < colArray.length; j++) {
+              const val = colArray.at(j) as number | null;
+              const member = this.members[j];
+              if (val && member?.isolationWindow)
+                member.isolationWindow.upperOffset = val;
+            }
+            break;
+          default:
+            console.warn("No handler for", metaCol);
+            this.visitAsParameter(colArray, metaCol);
+        }
+        continue;
+      }
+      this.visitAsParameter(colArray, new MetadataColumn(field.name, []));
+    }
+  }
+
+  visit(array: Arrow.Vector<Arrow.Struct>): PrecursorBuilder {
+    const sourceIndex = array.getChild("source_index");
+    const precursorIndex = array.getChild("precursor_index");
+    if (!sourceIndex || !precursorIndex) return this;
+    this.visitIndex(sourceIndex, precursorIndex);
+    for (let i = 0; i < array.type.children.length; i++) {
+      const field = array.type.children[i];
+      const colArray = array.getChildAt(i);
+      if (
+        field.name == "source_index" ||
+        field.name == "precursor_index" ||
+        !colArray
+      )
+        continue;
+
+      switch (field.name) {
+        case "activation":
+          this.visitActivation(
+            colArray,
+            this.mapping.mapChild(field.name) ?? MetadataTree.empty(),
+          );
+          break;
+        case "isolation_window":
+          this.visitIsolationWindow(
+            colArray,
+            this.mapping.mapChild("isolation_window") ?? MetadataTree.empty(),
+          );
+          break;
+        case "precursor_id":
+          for (let j = 0; j < colArray.length; j++) {
+            const val = colArray.at(j) as string | null;
+            const member = this.members[j];
+            if (val && member)
+              member.precursorId = val;
+          }
+          break;
+          break;
+        default:
+          this.visitAsParameter(colArray, new MetadataColumn(field.name, []))
+      }
+    }
+    return this;
+  }
+}
+
+export class SelectedIonBuilder extends RecordHasIonMobilityVisitor<SelectedIon> {
+  constructor(mapping: MetadataTree) {
+    super(mapping);
+  }
+
+  visitIndex(
+    sourceIndex: Arrow.Vector<Arrow.Uint64>,
+    precursorIndex: Arrow.Vector<Arrow.Uint64>,
+  ) {
+    for (let i = 0; i < sourceIndex?.length; i++) {
+      this.members.push(
+        sourceIndex.isValid(i)
+          ? new SelectedIon(
+              sourceIndex.at(i) as bigint,
+              precursorIndex.at(i) as bigint,
+            )
+          : null,
+      );
+    }
+  }
+
+  visit(array: Arrow.Vector<Arrow.Struct>) {
+    const sourceIndex = array.getChild("source_index");
+    const precursorIndex = array.getChild("precursor_index");
+    if (!sourceIndex || !precursorIndex) return this;
+    this.visitIndex(sourceIndex, precursorIndex);
+
+    for (let i = 0; i < array.type.children.length; i++) {
+      const field = array.type.children[i];
+      const colArray = array.getChildAt(i);
+      if (
+        field.name == "source_index" ||
+        field.name == "precursor_index" ||
+        !colArray
+      )
+        continue;
+
+      const metaCol = this.mapping.mapColumn(field.name);
+      if (metaCol) {
+        switch (metaCol.accession) {
+          case "MS:1000744":
+            for (let j = 0; j < colArray.length; j++) {
+              const val = colArray.at(j) as number | null;
+              const member = this.members[j];
+              if (val && member) member.mz = val;
+            }
+            break;
+          case "MS:1000041":
+            for (let j = 0; j < colArray.length; j++) {
+              const val = colArray.at(j) as number | null;
+              const member = this.members[j];
+              if (val && member) member.chargeState = val;
+            }
+            break;
+          case "MS:1000042":
+            for (let j = 0; j < colArray.length; j++) {
+              const val = colArray.at(j) as number | null;
+              const member = this.members[j];
+              if (val && member) member.intensity = val;
+            }
+            break;
+          default:
+            this.visitAsParameter(colArray, metaCol);
+        }
+        continue;
+      }
+
+      const isChild = this.mapping.mapChild(field.name);
+      if (isChild) {
+        continue;
+      }
+
+      switch (field.name) {
+        case "ion_mobility_value":
+          this.visitIonMobilityValue(colArray);
+          break;
+        case "ion_mobility_type":
+          this.visitIonMobilityType(colArray);
+          break;
+        case "parameters":
+          this.visitParameters(colArray);
+          break;
+        default:
+          this.visitAsParameter(colArray, new MetadataColumn(field.name, []));
+      }
+    }
+    return this;
+  }
+}
+
+export class ScanBuilder extends RecordHasIonMobilityVisitor<Scan> {
+  constructor(mapping: MetadataTree) {
+    super(mapping);
+  }
+
+  visitIndex(sourceIndex: Arrow.Vector<Arrow.Uint64>) {
+    for (let i = 0; i < sourceIndex?.length; i++) {
+      this.members.push(
+        sourceIndex.isValid(i)
+          ? new Scan(sourceIndex.at(i) as bigint, 0, [])
+          : null,
+      );
+    }
+  }
+
+  visit(array: Arrow.Vector<Arrow.Struct>) {
+    const sourceIndex = array.getChild("source_index");
+    if (!sourceIndex) return this;
+    this.visitIndex(sourceIndex);
+    for (let i = 0; i < array.type.children.length; i++) {
+      const field = array.type.children[i];
+      const colArray = array.getChildAt(i);
+      if (field.name == "source_index" || !colArray) continue;
+
+      const metaCol = this.mapping.mapColumn(field.name);
+      if (metaCol) {
+        switch (metaCol.accession) {
+          case "MS:1000016":
+            for (let j = 0; j < colArray.length; j++) {
+              const val = colArray.at(j);
+              const member = this.members[j];
+              if (val && member) member.parameters.push(metaCol.param(val));
+            }
+            break;
+          case "MS:1000616":
+            for (let j = 0; j < colArray.length; j++) {
+              const val = colArray.at(j) as number;
+              const member = this.members[j];
+              if (val && member) member.presetScanConfiguration = val;
+            }
+            break;
+          case "MS:1000512":
+            for (let j = 0; j < colArray.length; j++) {
+              const val = colArray.at(j);
+              const member = this.members[j];
+              if (val && member) member.parameters.push(metaCol.param(val));
+            }
+            break;
+          case "MS:1000927":
+            for (let j = 0; j < colArray.length; j++) {
+              const val = colArray.at(j) as number;
+              const member = this.members[j];
+              if (val && member) member.injectionTime = val;
+            }
+            break;
+          default:
+            for (let j = 0; j < colArray.length; j++) {
+              const val = colArray.at(j);
+              const member = this.members[j];
+              if (val && member) member.parameters.push(metaCol.param(val));
+            }
+        }
+        continue;
+      }
+      const isChild = this.mapping.mapChild(field.name);
+      if (isChild) {
+        if (field.name == "scan_windows") {
+          this.visitScanWindows(
+            colArray as Arrow.Vector<Arrow.List<Arrow.Struct>>,
+            isChild,
+          );
+        }
+        continue;
+      }
+
+      switch (field.name) {
+        case "scan_index":
+          break;
+        case "ion_mobility_value":
+          this.visitIonMobilityValue(colArray);
+          break;
+        case "ion_mobility_type":
+          this.visitIonMobilityType(colArray);
+          break;
+        case "instrument_configuration_id":
+          for (let j = 0; j < colArray.length; j++) {
+            const val = colArray.at(j) as number | null;
+            const member = this.members[j];
+            if (val && member) member.instrumentConfigurationRef = val;
+          }
+          break;
+        case "parameters":
+          this.visitParameters(colArray);
+          break;
+      }
+    }
+    return this;
+  }
+
+  visitScanWindows(
+    array: Arrow.Vector<Arrow.List<Arrow.Struct>>,
+    mapping: MetadataTree,
+  ) {
+    for (let i = 0; i < array.length; i++) {
+      const rowVec = array.get(i);
+      const member = this.members[i];
+      if (!rowVec || !member) continue;
+      const windows = [];
+      for (let j = 0; j < rowVec.length; j++) {
+        windows.push(new ScanWindow(0, 0));
+      }
+      for (let j = 0; j < rowVec.type.children.length; j++) {
+        const f = rowVec.type.children[j];
+        const colArr = rowVec.getChildAt(j);
+        const metaCol = mapping.mapColumn(f.name);
+        if (metaCol && colArr) {
+          switch (metaCol.accession) {
+            case "MS:1000501": // lower
+              for (let k = 0; k < rowVec.length; k++) {
+                const val = colArr.get(k) as number | null;
+                if (val != null) windows[k].lowerBound = val;
+              }
+              break;
+            case "MS:1000500": // upper
+              for (let k = 0; k < rowVec.length; k++) {
+                const val = colArr.get(k) as number | null;
+                if (val != null) windows[k].upperBound = val;
+              }
+              break;
+            default:
+              break;
+          }
+        }
+      }
+      member.scanWindows = windows;
+    }
+  }
+}
+
+interface HasAuxiliaryArrays {
+  auxiliaryArrays: AuxiliaryArray[];
+}
+
+function visitAuxiliaryArrays<T extends HasAuxiliaryArrays>(
+  members: (T | null)[],
+  array: Arrow.Vector<Arrow.List<Arrow.Struct>>,
+) {
+  for (let i = 0; i < array.length; i++) {
+    const rowVec = array.get(i);
+    const member = members[i];
+    if (!rowVec || !member) continue;
+    member.auxiliaryArrays = AuxiliaryArrayDecoder.decode(rowVec);
+  }
+}
+
+export class SpectrumBuilder extends RecordVisitor<Spectrum> {
+  constructor(mapping: MetadataTree) {
+    super(mapping);
+  }
+
+  visitIndex(sourceIndex: Arrow.Vector<Arrow.Uint64>) {
+    for (let i = 0; i < sourceIndex?.length; i++) {
+      this.members.push(
+        sourceIndex.isValid(i)
+          ? new Spectrum("", sourceIndex.get(i) as bigint, 0, false, 0, 0, [])
+          : null,
+      );
+    }
+  }
+
+  visitAuxiliaryArrays(array: Arrow.Vector<Arrow.List<Arrow.Struct>>) {
+    visitAuxiliaryArrays(this.members, array);
+  }
+
+  visit(array: Arrow.Vector<Arrow.Struct>) {
+    const sourceIndex = array.getChild("index");
+    if (!sourceIndex) return this;
+    this.visitIndex(sourceIndex);
+    for (let i = 0; i < array.type.children.length; i++) {
+      const field = array.type.children[i];
+      const colArray = array.getChildAt(i);
+      if (field.name == "index" || !colArray) continue;
+      const metaCol = this.mapping.mapColumn(field.name);
+      if (metaCol) {
+        switch (metaCol.accession) {
+          case "MS:1000465":
+            for (let j = 0; j < colArray.length; j++) {
+              const val = colArray.at(j);
+              const member = this.members[j];
+              if (val && member) {
+                member.polarity = val;
+              }
+            }
+            break;
+          case "MS:1000511":
+            for (let j = 0; j < colArray.length; j++) {
+              const val = colArray.at(j);
+              const member = this.members[j];
+              if (val && member) member.msLevel = val;
+            }
+            break;
+          case "MS:1000525":
+            for (let j = 0; j < colArray.length; j++) {
+              const val = colArray.at(j) as string | null;
+              const member = this.members[j];
+              if (val && member) member.isProfile = val == "MS:1000128";
+            }
+            break;
+          case "MS:1000559":
+            for (let j = 0; j < colArray.length; j++) {
+              const val = colArray.at(j);
+              const member = this.members[j];
+              if (val && member) member.parameters.push(metaCol.param(val));
+            }
+            break;
+          case "MS:1000504":
+          case "MS:1000505":
+          case "MS:1000285":
+          case "MS:1000527":
+          case "MS:1000528":
+          case "MS:1003060":
+          case "MS:1003059":
+            for (let j = 0; j < colArray.length; j++) {
+              const val = colArray.at(j) as number;
+              const member = this.members[j];
+              if (val && member) member.parameters.push(metaCol.param(val));
+            }
+            break;
+          default:
+            for (let j = 0; j < colArray.length; j++) {
+              const val = colArray.at(j);
+              const member = this.members[j];
+              if (val && member) member.parameters.push(metaCol.param(val));
+            }
+        }
+        continue;
+      }
+      const isChild = this.mapping.mapChild(field.name);
+      if (isChild) {
+        continue;
+      }
+
+      switch (field.name) {
+        case "id":
+          for (let j = 0; j < colArray.length; j++) {
+            const val = colArray.at(j);
+            const member = this.members[j];
+            if (val && member) member.id = val;
+          }
+          break;
+        case "time":
+          for (let j = 0; j < colArray.length; j++) {
+            const val = colArray.at(j);
+            const member = this.members[j];
+            if (val && member) member.time = val;
+          }
+          break;
+        case "parameters":
+          this.visitParameters(colArray);
+          break;
+        case "data_processing_id":
+        case "number_of_auxiliary_arrays":
+        case "mz_delta_model":
+          break;
+        case "auxiliary_arrays":
+          this.visitAuxiliaryArrays(colArray);
+          break;
+        default:
+          this.visitAsParameter(
+            colArray,
+            new MetadataColumn(field.name, [field.name]),
+          );
+      }
+    }
+    return this;
+  }
+}
+
+export class ChromatogramBuilder extends RecordVisitor<Chromatogram> {
+  constructor(mapping: MetadataTree) {
+    super(mapping);
+  }
+
+  visitIndex(sourceIndex: Arrow.Vector<Arrow.Uint64>) {
+    for (let i = 0; i < sourceIndex?.length; i++) {
+      this.members.push(
+        sourceIndex.isValid(i)
+          ? new Chromatogram("", sourceIndex.get(i) as bigint, [])
+          : null,
+      );
+    }
+  }
+
+  visitAuxiliaryArrays(array: Arrow.Vector<Arrow.List<Arrow.Struct>>) {
+    visitAuxiliaryArrays(this.members, array);
+  }
+
+  visit(array: Arrow.Vector<Arrow.Struct>) {
+    const sourceIndex = array.getChild("index");
+    if (!sourceIndex) return this;
+    this.visitIndex(sourceIndex);
+    for (let i = 0; i < array.type.children.length; i++) {
+      const field = array.type.children[i];
+      const colArray = array.getChildAt(i);
+      if (field.name == "index" || !colArray) continue;
+      const metaCol = this.mapping.mapColumn(field.name);
+      if (metaCol) {
+        switch (metaCol.accession) {
+
+          case "MS:1000626":
+          case "MS:1000559":
+            for (let j = 0; j < colArray.length; j++) {
+              const val = colArray.at(j);
+              const member = this.members[j];
+              if (val && member) member.parameters.push(metaCol.param(val));
+            }
+            break;
+          default:
+            for (let j = 0; j < colArray.length; j++) {
+              const val = colArray.at(j);
+              const member = this.members[j];
+              if (val && member) member.parameters.push(metaCol.param(val));
+            }
+        }
+        continue;
+      }
+      const isChild = this.mapping.mapChild(field.name);
+      if (isChild) {
+        console.log(field.name, isChild, colArray);
+        continue;
+      }
+
+      switch (field.name) {
+        case "id":
+          for (let j = 0; j < colArray.length; j++) {
+            const val = colArray.at(j);
+            const member = this.members[j];
+            if (val && member) member.id = val;
+          }
+          break;
+        case "parameters":
+          this.visitParameters(colArray);
+          break;
+        case "data_processing_id":
+        case "number_of_auxiliary_arrays":
+          break;
+        case "auxiliary_arrays":
+          this.visitAuxiliaryArrays(colArray);
+          break;
+        default:
+          this.visitAsParameter(
+            colArray,
+            new MetadataColumn(field.name, [field.name]),
+          );
+      }
+    }
+    return this;
+  }
+}
 
 export class ParamDescribed {
   params: Param[];
-  meta?: any;
 
   constructor(params: Param[]) {
     this.params = params;
@@ -16,15 +734,21 @@ export class ParamDescribed {
   getParamByAccession(accession: string): Param | undefined {
     let value = this.params.find((p) => p.accession == accession);
     if (value != undefined) return value;
-    else if (this.meta) {
-      for (let [key, val] of Object.entries(this.meta)) {
-        const spec = ParamColumnSpec.fromColumnName(key);
-        if (spec.accession == accession && !spec.isUnitOnly) {
-          return new Param(spec.name, val, spec.accession, spec.unit);
-        }
-      }
-    }
-    return undefined;
+  }
+}
+
+export class HasIonMobility extends ParamDescribed {
+  ionMobilityValue: number | null;
+  ionMobilityType: string | null;
+
+  constructor(
+    params: Param[],
+    ionMobilityValue: number | null,
+    ionMobilityType: string | null,
+  ) {
+    super(params);
+    this.ionMobilityValue = ionMobilityValue;
+    this.ionMobilityType = ionMobilityType;
   }
 }
 
@@ -36,23 +760,15 @@ export class ScanWindow {
     this.lowerBound = lowerBound;
     this.upperBound = upperBound;
   }
-
-  static fromRecord(record: any) {
-    return new ScanWindow(
-      record["MS_1000501_scan_window_lower_limit_unit_MS_1000040"],
-      record["MS_1000500_scan_window_upper_limit_unit_MS_1000040"],
-    );
-  }
 }
 
-export class Scan extends ParamDescribed {
+export class Scan extends HasIonMobility {
   sourceIndex: bigint;
   instrumentConfigurationRef: number;
   params: Param[];
   scanWindows: any[];
   injectionTime?: number;
   presetScanConfiguration?: number;
-  meta: any | null;
 
   constructor(
     sourceIndex: bigint,
@@ -61,30 +777,14 @@ export class Scan extends ParamDescribed {
     scanWindows?: any[],
     injectionTime?: number,
     presetScanConfiguration?: number,
-    meta?: any,
   ) {
-    super(params);
+    super(params, null, null);
     this.sourceIndex = sourceIndex;
     this.instrumentConfigurationRef = instrumentConfigurationRef;
     this.params = params;
     this.scanWindows = scanWindows ?? [];
     this.injectionTime = injectionTime;
     this.presetScanConfiguration = presetScanConfiguration;
-    this.meta = meta;
-  }
-
-  static fromRecord(record: any) {
-    return new Scan(
-      record.source_index,
-      record.instrument_configuration_ref,
-      record.parameters,
-      Array.from(record.scan_windows ?? []).map((w: any) =>
-        ScanWindow.fromRecord(w.toJSON()),
-      ),
-      record["MS_1000927_ion_injection_time_unit_UO_0000028"],
-      record["MS_1000616_preset_scan_configuration"],
-      record,
-    );
   }
 }
 
@@ -106,99 +806,64 @@ export class IsolationWindow {
   get upperBound() {
     return this.target + this.upperOffset;
   }
+}
 
-  static fromRecord(record: any) {
-    return new IsolationWindow(
-      record["MS_1000827_isolation_window_target_mz"],
-      record["MS_1000828_isolation_window_lower_offset"],
-      record["MS_1000829_isolation_window_upper_offset"],
-    );
+export class Activation extends ParamDescribed {
+  constructor(parameters: Param[]) {
+    super(parameters);
   }
 }
 
-export class Precursor {
+export class Precursor extends ParamDescribed {
   sourceIndex: bigint;
   precursorIndex: bigint;
-  activation: Param[];
-  isolationWindow: IsolationWindow;
-  meta: any;
+  precursorId: string;
+  activation: Activation;
+  isolationWindow: IsolationWindow | null;
 
   constructor(
     sourceIndex: bigint,
     precursorIndex: bigint,
-    activation: Param[],
-    isolationWindow: IsolationWindow,
-    meta?: any,
+    activation: Activation,
+    isolationWindow: IsolationWindow | null,
+    precursorId: string,
   ) {
+    super([]);
     this.sourceIndex = sourceIndex;
     this.precursorIndex = precursorIndex;
     this.activation = activation;
     this.isolationWindow = isolationWindow;
-    this.meta = meta;
-  }
-
-  static fromRecord(record: any) {
-    const activation = record.activation.parameters;
-    return new Precursor(
-      record.source_index,
-      record.prescursor_index,
-      activation,
-      IsolationWindow.fromRecord(record.isolation_window),
-      record,
-    );
+    this.precursorId = precursorId
   }
 }
 
-export class SelectedIon extends ParamDescribed {
+export class SelectedIon extends HasIonMobility {
   sourceIndex: bigint;
   precursorIndex: bigint;
   chargeState: number | null;
   intensity: number | null;
   mz: number | null;
-  ionMobility: number | null;
   params: Param[];
-  meta: any;
 
   constructor(
     sourceIndex: bigint,
     precursorIndex: bigint,
     mz?: number,
     intensity?: number,
-    chargeState?: number|null,
-    ionMobility?: number|null,
+    chargeState?: number | null,
+    ionMobilityValue?: number | null,
+    ionMobilityType?: string | null,
     parameters?: Param[],
-    meta?: any,
   ) {
-    super(parameters ?? []);
+    super(parameters ?? [], ionMobilityValue ?? null, ionMobilityType ?? null);
     this.sourceIndex = sourceIndex;
     this.precursorIndex = precursorIndex;
     this.chargeState = chargeState ?? null;
     this.mz = mz ?? null;
     this.intensity = intensity ?? null;
-    this.ionMobility = ionMobility ?? null;
+    this.ionMobilityValue = ionMobilityValue ?? null;
+    this.ionMobilityType = ionMobilityType ?? null;
     this.params = parameters ?? [];
-    this.meta = meta;
-  }
-
-  static fromRecord(record: any) {
-    const parameters = record?.parameters?.map(Param.fromArrow) || [];
-    let charge: number | null;
-    if (record["MS_1000041_charge_state"]) {
-      charge = Number(record["MS_1000041_charge_state"]);
-    }
-    else {
-      charge = null
-    }
-    return new SelectedIon(
-      record.source_index,
-      record.precursor_index,
-      record["MS_1000744_selected_ion_mz_unit_MS_1000040"],
-      record["MS_1000042_intensity_unit_MS_1000131"],
-      charge,
-      record["ion_mobility"],
-      parameters,
-      record,
-    );
   }
 }
 
@@ -218,10 +883,9 @@ export class Spectrum extends ParamDescribed {
   scans: Scan[];
   precursors: Precursor[];
   selectedIons: SelectedIon[];
-  meta: any | null;
   dataArrays: DataArrays;
   centroids: PointLike[] | null;
-  auxiliaryArrays: AuxiliaryArray[] | null;
+  auxiliaryArrays: AuxiliaryArray[];
 
   constructor(
     id: string,
@@ -234,7 +898,6 @@ export class Spectrum extends ParamDescribed {
     scans?: any[],
     precursors?: any[],
     selectedIons?: any[],
-    meta?: any | null,
     dataArrays: DataArrays | null = null,
     centroids: PointLike[] | null = null,
     auxiliaryArrays: AuxiliaryArray[] | null = null,
@@ -250,14 +913,13 @@ export class Spectrum extends ParamDescribed {
     this.scans = scans ?? [];
     this.precursors = precursors ?? [];
     this.selectedIons = selectedIons ?? [];
-    this.meta = meta ?? null;
     this.dataArrays = dataArrays ?? {};
     this.centroids = centroids;
-    this.auxiliaryArrays = auxiliaryArrays;
+    this.auxiliaryArrays = auxiliaryArrays ?? [];
     if (this.auxiliaryArrays) {
-      this.auxiliaryArrays.forEach(aux => {
-        this.dataArrays[aux.name] = aux.values
-      })
+      this.auxiliaryArrays.forEach((aux) => {
+        this.dataArrays[aux.name] = aux.values;
+      });
     }
   }
 
@@ -282,28 +944,6 @@ export class Spectrum extends ParamDescribed {
       }
     }
   }
-
-  static fromRecord(
-    record: any,
-    auxiliaryArrays: AuxiliaryArray[] | null = null,
-  ) {
-    return new Spectrum(
-      record.id,
-      record.index,
-      record["MS_1000511_ms_level"],
-      record["MS_1000525_spectrum_representation"] == "MS:1000128",
-      record["MS_1000465_scan_polarity"],
-      record["time"],
-      record["parameters"],
-      (record["scans"] ?? []).map(Scan.fromRecord),
-      (record["precursors"] ?? []).map(Precursor.fromRecord),
-      (record["selectedIons"] ?? []).map(SelectedIon.fromRecord),
-      record,
-      record.dataArrays,
-      null,
-      auxiliaryArrays
-    );
-  }
 }
 
 export class Chromatogram extends ParamDescribed {
@@ -312,9 +952,8 @@ export class Chromatogram extends ParamDescribed {
   params: Param[];
   precursors: Precursor[];
   selectedIons: SelectedIon[];
-  meta: any | null;
   dataArrays: DataArrays;
-  auxiliaryArrays: AuxiliaryArray[] | null;
+  auxiliaryArrays: AuxiliaryArray[];
 
   constructor(
     id: string,
@@ -322,7 +961,6 @@ export class Chromatogram extends ParamDescribed {
     params: Param[],
     precursors?: any[],
     selectedIons?: any[],
-    meta?: any | null,
     dataArrays?: DataArrays,
     auxiliaryArrays: AuxiliaryArray[] | null = null,
   ) {
@@ -332,9 +970,8 @@ export class Chromatogram extends ParamDescribed {
     this.params = params;
     this.precursors = precursors ?? [];
     this.selectedIons = selectedIons ?? [];
-    this.meta = meta ?? null;
     this.dataArrays = dataArrays ?? {};
-    this.auxiliaryArrays = auxiliaryArrays;
+    this.auxiliaryArrays = auxiliaryArrays ?? [];
     if (this.auxiliaryArrays) {
       this.auxiliaryArrays.forEach((aux) => {
         this.dataArrays[aux.name] = aux.values;
@@ -344,22 +981,5 @@ export class Chromatogram extends ParamDescribed {
 
   get rawArrays() {
     return this.dataArrays;
-  }
-
-  static fromRecord(
-    record: any,
-    auxiliaryArrays: AuxiliaryArray[] | null = null,
-  ) {
-    const parameters = record?.parameters?.map(Param.fromArrow) || [];
-    return new Chromatogram(
-      record.id,
-      record.index,
-      parameters,
-      (record["precursors"] ?? []).map(Precursor.fromRecord),
-      (record["selectedIons"] ?? []).map(SelectedIon.fromRecord),
-      record,
-      record.dataArrays,
-      auxiliaryArrays
-    );
   }
 }

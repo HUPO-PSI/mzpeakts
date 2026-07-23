@@ -31,7 +31,11 @@ export {
   Precursor,
   Scan,
   IsolationWindow,
-  Chromatogram
+  Chromatogram,
+  MetadataTree,
+  ScanBuilder,
+  SelectedIonBuilder,
+  SpectrumBuilder,
 } from "./record";
 export {
   DataArraysReader,
@@ -48,3 +52,4 @@ export { ArrayIndex, ArrayIndexEntry, BufferContext, BufferFormat, BufferPriorit
 export { MzPeakReader } from "./reader";
 export type { XIC, XICPoint } from "./reader";
 export * as data from "./data";
+export * as utils from "./utils"
