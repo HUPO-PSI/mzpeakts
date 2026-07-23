@@ -66,8 +66,8 @@ export class SpacingInterpolationModel {
   }
 }
 
-export const NULL_INTERPOLATE_CURIE = "MS:1003901";
-export const NULL_ZERO_CURIE = "MS:1003902";
+export const NULL_INTERPOLATE_CURIE = "MS:1003902";
+export const NULL_ZERO_CURIE = "MS:1003901";
 
 const NO_COMPRESSION_CURIE = "MS:1000576";
 const DELTA_CURIE = "MS:1003089";
