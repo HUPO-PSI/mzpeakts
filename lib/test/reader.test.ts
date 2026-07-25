@@ -191,6 +191,7 @@ test("read remote", async () => {
     const reader = await MzPeakReader.fromUrl("http://localhost:8030/small.mzpeak")
     expect.assert(reader.length == 48);
   } catch(err) {
+    expect.assert((err as any).cause.code == "ECONNREFUSED")
     expect.assert((err as Error).message.match(/fetch failed/g))
   }
 })

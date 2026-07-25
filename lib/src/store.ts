@@ -64,6 +64,7 @@ export enum EntityTypeTag {
   Chromatogram = CHROMATOGRAM,
   WavelengthSpectrum = WAVELENGTH_SPECTRUM,
   Other = OTHER,
+  Proprietary = PROPRIETARY,
 }
 
 

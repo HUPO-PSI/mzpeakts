@@ -13,7 +13,6 @@ export {
   SpectrumMetadata,
   ChromatogramMetadata,
   Param,
-  ParamColumnSpec,
   DataProcessingMethod,
   FileDescription,
   FileMetadata,

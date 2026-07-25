@@ -26,8 +26,8 @@ import {
   MetadataColumn,
 } from "./store";
 
-const DATA_POINT_COUNT_TERM = "number_of_data_points";
-const PEAK_COUNT_TERM = "number_of_peaks";
+const DATA_POINT_COUNT_ACC = "MS:1003060";
+const PEAK_COUNT_ACC = "MS:1003059";
 
 function emptyStructVecFrom(type: Arrow.Struct) {
   return Arrow.makeVector(Arrow.makeData({ type }));
@@ -56,50 +56,6 @@ export function wasmArrowToArrowJS(ffi: FFIStream): Arrow.Vector<Arrow.Struct> {
   else return chunks[0].concat(...chunks.slice(1));
 }
 
-export class ParamColumnSpec {
-  source: string;
-  name: string;
-  accession: string | null;
-  unit: string | null;
-  isUnitOnly: boolean;
-
-  constructor(
-    source: string,
-    name: string,
-    accession: string | null = null,
-    unit: string | null = null,
-    isUnitOnly: boolean = false,
-  ) {
-    this.source = source;
-    this.name = name;
-    this.accession = accession;
-    this.unit = unit;
-    this.isUnitOnly = isUnitOnly;
-  }
-
-  static fromColumnName(colName: string) {
-    const tokens = colName.split("_");
-    // Too short to be a complete CV qualified name
-    if (tokens.length < 3) return new ParamColumnSpec(colName, colName);
-    const cvPrefix = tokens[0];
-    // Don't know the CV
-    if (cvPrefix != "MS" && cvPrefix != "UO")
-      return new ParamColumnSpec(colName, colName);
-    const accession = `${cvPrefix}:${tokens[1]}`;
-    const unitIdx = tokens.findIndex((v) => v == "unit");
-    if (unitIdx == -1) {
-      const name = tokens.slice(2).join(" ");
-      return new ParamColumnSpec(colName, name, accession);
-    } else if (unitIdx < tokens.length - 1) {
-      const name = tokens.slice(2, unitIdx).join(" ");
-      const unit = tokens.slice(unitIdx + 1).join(":");
-      return new ParamColumnSpec(colName, name, accession, unit);
-    } else {
-      const name = tokens.slice(2).join(" ");
-      return new ParamColumnSpec(colName, name, accession, null, true);
-    }
-  }
-}
 
 export class Param {
   name: string;
@@ -402,6 +358,8 @@ abstract class MetadataReaderBase {
   metadataTrees: Map<string, MetadataTree>;
   /** Whether the {@link init} method has been called, which asynchronously loads data */
   initialized: boolean = false;
+  dataPointCountColumn: string | null
+  peakCountColumn: string | null
 
   /**
    * The basic constructor for {@link MetadataReaderBase} instances. This does not
@@ -417,6 +375,12 @@ abstract class MetadataReaderBase {
       this.metadataTrees.set(k, MetadataTree.fromMetadataMap(v));
     }
     this.initialized = false;
+    this.peakCountColumn = null
+    this.dataPointCountColumn = null
+    const root = this.metadataTrees.get(DataKindTag.Metadata)
+    this.dataPointCountColumn = root?.columnForCURIE(DATA_POINT_COUNT_ACC)?.[0] ?? null;
+    this.peakCountColumn =
+      root?.columnForCURIE(PEAK_COUNT_ACC)?.[0] ?? null;
   }
 
   mappingsFor(kind: string) {
@@ -440,9 +404,10 @@ abstract class MetadataReaderBase {
   dataPointCount(
     index: number | undefined = undefined,
   ): number | null | Arrow.Vector<Arrow.Uint64> {
+    if (!this.dataPointCountColumn) return null;
     const main = this._mainStruct;
     const counter: Arrow.Vector<Arrow.Uint64> | null = main?.getChild(
-      DATA_POINT_COUNT_TERM,
+      this.dataPointCountColumn,
     ) as any;
     if (index == undefined) {
       return counter;
@@ -467,9 +432,10 @@ abstract class MetadataReaderBase {
   peakCount(
     index: number | undefined = undefined,
   ): number | null | Arrow.Vector<Arrow.Uint64> {
+    if (!this.peakCountColumn) return null;
     const main = this._mainStruct;
     const counter: Arrow.Vector<Arrow.Uint64> | null = main?.getChild(
-      PEAK_COUNT_TERM,
+      this.peakCountColumn,
     ) as any;
     if (index == undefined) {
       return counter;

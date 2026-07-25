@@ -30,6 +30,10 @@ export class MetadataTree {
     return this.children.get(name);
   }
 
+  columnForCURIE(accession: string) {
+    return this.columns.entries().find(([_, v]) => v.accession == accession)
+  }
+
   static empty() {
     return MetadataTree.fromMetadataMap([]);
   }
@@ -545,7 +549,7 @@ export class SpectrumBuilder extends RecordVisitor<Spectrum> {
       const metaCol = this.mapping.mapColumn(field.name);
       if (metaCol) {
         switch (metaCol.accession) {
-          case "MS:1000465":
+          case "MS:1000465": // scan polarity
             for (let j = 0; j < colArray.length; j++) {
               const val = colArray.at(j);
               const member = this.members[j];
@@ -554,27 +558,21 @@ export class SpectrumBuilder extends RecordVisitor<Spectrum> {
               }
             }
             break;
-          case "MS:1000511":
+          case "MS:1000511": // ms level
             for (let j = 0; j < colArray.length; j++) {
               const val = colArray.at(j);
               const member = this.members[j];
               if (val && member) member.msLevel = val;
             }
             break;
-          case "MS:1000525":
+          case "MS:1000525": // spectrum representation
             for (let j = 0; j < colArray.length; j++) {
               const val = colArray.at(j) as string | null;
               const member = this.members[j];
-              if (val && member) member.isProfile = val == "MS:1000128";
+              if (val && member) member.isProfile = val == "MS:1000128"; // profile spectrum
             }
             break;
           case "MS:1000559":
-            for (let j = 0; j < colArray.length; j++) {
-              const val = colArray.at(j);
-              const member = this.members[j];
-              if (val && member) member.parameters.push(metaCol.param(val));
-            }
-            break;
           case "MS:1000504":
           case "MS:1000505":
           case "MS:1000285":
@@ -582,18 +580,10 @@ export class SpectrumBuilder extends RecordVisitor<Spectrum> {
           case "MS:1000528":
           case "MS:1003060":
           case "MS:1003059":
-            for (let j = 0; j < colArray.length; j++) {
-              const val = colArray.at(j) as number;
-              const member = this.members[j];
-              if (val && member) member.parameters.push(metaCol.param(val));
-            }
+            this.visitAsParameter(colArray, metaCol);
             break;
           default:
-            for (let j = 0; j < colArray.length; j++) {
-              const val = colArray.at(j);
-              const member = this.members[j];
-              if (val && member) member.parameters.push(metaCol.param(val));
-            }
+            this.visitAsParameter(colArray, metaCol)
         }
         continue;
       }
@@ -766,7 +756,7 @@ export class Scan extends HasIonMobility {
   sourceIndex: bigint;
   instrumentConfigurationRef: number;
   params: Param[];
-  scanWindows: any[];
+  scanWindows: ScanWindow[];
   injectionTime?: number;
   presetScanConfiguration?: number;
 
@@ -774,7 +764,7 @@ export class Scan extends HasIonMobility {
     sourceIndex: bigint,
     instrumentConfigurationRef: number,
     params: Param[],
-    scanWindows?: any[],
+    scanWindows?: ScanWindow[],
     injectionTime?: number,
     presetScanConfiguration?: number,
   ) {
@@ -843,7 +833,6 @@ export class SelectedIon extends HasIonMobility {
   chargeState: number | null;
   intensity: number | null;
   mz: number | null;
-  params: Param[];
 
   constructor(
     sourceIndex: bigint,
@@ -861,9 +850,6 @@ export class SelectedIon extends HasIonMobility {
     this.chargeState = chargeState ?? null;
     this.mz = mz ?? null;
     this.intensity = intensity ?? null;
-    this.ionMobilityValue = ionMobilityValue ?? null;
-    this.ionMobilityType = ionMobilityType ?? null;
-    this.params = parameters ?? [];
   }
 }
 
