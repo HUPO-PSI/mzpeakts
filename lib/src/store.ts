@@ -1,11 +1,9 @@
 // @ts-check
 import * as zip from "@zip.js/zip.js";
 import { ParquetFile, setPanicHook } from "parquet-wasm";
-import { Param, ParquetTableNamespace } from './metadata';
+import { Param, ParquetTableNamespace } from "./metadata";
 
 setPanicHook();
-
-
 
 const SPECTRUM = "spectrum";
 const CHROMATOGRAM = "chromatogram";
@@ -54,7 +52,8 @@ export class DataKind {
 
   static fromString(key: string) {
     const maybe: string | undefined = (<any>DataKindTag)[key];
-    const tag: DataKindTag = maybe == undefined ? DataKindTag.Other : (<any>DataKindTag)[maybe];
+    const tag: DataKindTag =
+      maybe == undefined ? DataKindTag.Other : (<any>DataKindTag)[maybe];
     return new DataKind(key, tag);
   }
 }
@@ -66,7 +65,6 @@ export enum EntityTypeTag {
   Other = OTHER,
   Proprietary = PROPRIETARY,
 }
-
 
 export class EntityType {
   name: string;
@@ -88,28 +86,33 @@ export class EntityType {
   }
 
   static fromString(key: string) {
-    const maybe: EntityTypeTag | undefined = (<any>EntityTypeTag)[key]
-    const tag: EntityTypeTag = maybe == undefined ? EntityTypeTag.Other : (<any>EntityTypeTag)[maybe];
-    return new EntityType(key, tag)
+    const maybe: EntityTypeTag | undefined = (<any>EntityTypeTag)[key];
+    const tag: EntityTypeTag =
+      maybe == undefined ? EntityTypeTag.Other : (<any>EntityTypeTag)[maybe];
+    return new EntityType(key, tag);
   }
 }
 
-
 export class MetadataColumn {
-  name: string
-  path: string[]
-  accession: string | null = null
-  unit: string | null = null
+  name: string;
+  path: string[];
+  accession: string | null = null;
+  unit: string | null = null;
 
-  constructor(name: string, path: string[], accession: string | null = null, unit: string | null = null) {
-    this.name = name
-    this.path = path
-    this.accession = accession
-    this.unit = unit
+  constructor(
+    name: string,
+    path: string[],
+    accession: string | null = null,
+    unit: string | null = null,
+  ) {
+    this.name = name;
+    this.path = path;
+    this.accession = accession;
+    this.unit = unit;
   }
 
   param(value: any | null) {
-    return new Param(this.name, value, this.accession, this.unit)
+    return new Param(this.name, value, this.accession, this.unit);
   }
 
   get leaf() {
@@ -117,10 +120,14 @@ export class MetadataColumn {
   }
 
   static fromRaw(value: any) {
-    return new MetadataColumn(value.name, value.path, value.accession || null, value.unit || null)
+    return new MetadataColumn(
+      value.name,
+      value.path,
+      value.accession || null,
+      value.unit || null,
+    );
   }
 }
-
 
 export class FileIndexEntry {
   name: string;
@@ -129,12 +136,24 @@ export class FileIndexEntry {
   column_mapping: MetadataColumn[];
   parameters: Param[];
 
-  constructor(name: string, data_kind: string, entity_type: string, column_mapping: any[], parameters: any[]) {
+  constructor(
+    name: string,
+    data_kind: string,
+    entity_type: string,
+    column_mapping: any[],
+    parameters: any[],
+  ) {
     this.name = name;
     this.data_kind = DataKind.fromString(data_kind);
     this.entity_type = EntityType.fromString(entity_type);
-    this.column_mapping = column_mapping ? column_mapping.map(MetadataColumn.fromRaw) : []
-    this.parameters = parameters ? parameters.map(Param.fromJSON) : []
+    this.column_mapping = column_mapping
+      ? column_mapping.map(MetadataColumn.fromRaw)
+      : [];
+    this.parameters = parameters ? parameters.map(Param.fromJSON) : [];
+  }
+
+  get columnMapping() {
+    return this.column_mapping;
   }
 
   get dataKind(): DataKind {
@@ -159,7 +178,14 @@ export class FileIndex {
 
   static fromRaw(indexObj: any) {
     const files = Array.from(indexObj.files).map(
-      (e: any) => new FileIndexEntry(e.name, e.data_kind, e.entity_type, e.column_mapping, e.parameters),
+      (e: any) =>
+        new FileIndexEntry(
+          e.name,
+          e.data_kind,
+          e.entity_type,
+          e.column_mapping,
+          e.parameters,
+        ),
     );
     return new FileIndex(files, indexObj.metadata);
   }
@@ -199,7 +225,7 @@ export class ZipStorage<T> {
   }
 
   async openMetadataNamespace(entityType: EntityTypeTag | EntityType) {
-    return ParquetTableNamespace.populateFromStorage(this, entityType)
+    return ParquetTableNamespace.populateFromStorage(this, entityType);
   }
 
   /**

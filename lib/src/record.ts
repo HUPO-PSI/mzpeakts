@@ -1,9 +1,5 @@
 import { DataArrays } from "./data";
-import {
-  AuxiliaryArray,
-  Param,
-  AuxiliaryArrayDecoder,
-} from "./metadata";
+import { Param } from "./metadata";
 import { MetadataColumn } from "./store";
 import * as Arrow from "apache-arrow";
 
@@ -31,7 +27,7 @@ export class MetadataTree {
   }
 
   columnForCURIE(accession: string) {
-    return this.columns.entries().find(([_, v]) => v.accession == accession)
+    return this.columns.entries().find(([_, v]) => v.accession == accession);
   }
 
   static empty() {
@@ -148,7 +144,7 @@ export class PrecursorBuilder extends RecordVisitor<Precursor> {
               precursorIndex.at(i) as bigint,
               new Activation([]),
               new IsolationWindow(0, 0, 0),
-              ""
+              "",
             )
           : null,
       );
@@ -261,13 +257,12 @@ export class PrecursorBuilder extends RecordVisitor<Precursor> {
           for (let j = 0; j < colArray.length; j++) {
             const val = colArray.at(j) as string | null;
             const member = this.members[j];
-            if (val && member)
-              member.precursorId = val;
+            if (val && member) member.precursorId = val;
           }
           break;
           break;
         default:
-          this.visitAsParameter(colArray, new MetadataColumn(field.name, []))
+          this.visitAsParameter(colArray, new MetadataColumn(field.name, []));
       }
     }
     return this;
@@ -515,7 +510,7 @@ function visitAuxiliaryArrays<T extends HasAuxiliaryArrays>(
     const rowVec = array.get(i);
     const member = members[i];
     if (!rowVec || !member) continue;
-    member.auxiliaryArrays = AuxiliaryArrayDecoder.decode(rowVec);
+    member.auxiliaryArrays = AuxiliaryArrayBuilder.decode(rowVec);
   }
 }
 
@@ -583,7 +578,7 @@ export class SpectrumBuilder extends RecordVisitor<Spectrum> {
             this.visitAsParameter(colArray, metaCol);
             break;
           default:
-            this.visitAsParameter(colArray, metaCol)
+            this.visitAsParameter(colArray, metaCol);
         }
         continue;
       }
@@ -658,7 +653,6 @@ export class ChromatogramBuilder extends RecordVisitor<Chromatogram> {
       const metaCol = this.mapping.mapColumn(field.name);
       if (metaCol) {
         switch (metaCol.accession) {
-
           case "MS:1000626":
           case "MS:1000559":
             for (let j = 0; j < colArray.length; j++) {
@@ -823,7 +817,7 @@ export class Precursor extends ParamDescribed {
     this.precursorIndex = precursorIndex;
     this.activation = activation;
     this.isolationWindow = isolationWindow;
-    this.precursorId = precursorId
+    this.precursorId = precursorId;
   }
 }
 
@@ -967,5 +961,78 @@ export class Chromatogram extends ParamDescribed {
 
   get rawArrays() {
     return this.dataArrays;
+  }
+}
+
+export class AuxiliaryArray {
+  name: string;
+  values: Int32Array | Float32Array | Float64Array | BigInt64Array | string[];
+  parameters: Param[];
+  unit: string | null;
+
+  constructor(
+    name: string,
+    values: Int32Array | Float32Array | Float64Array | BigInt64Array | string[],
+    parameters?: Param[],
+    unit: string | null = null,
+  ) {
+    this.name = name;
+    this.values = values;
+    this.parameters = parameters || [];
+    this.unit = unit;
+  }
+}
+
+export class AuxiliaryArrayBuilder {
+  static ArrayTypes: Record<
+    string,
+    | Int32ArrayConstructor
+    | Float32ArrayConstructor
+    | BigInt64ArrayConstructor
+    | Float64ArrayConstructor
+  > = {
+    "MS:1000519": Int32Array,
+    "MS:1000521": Float32Array,
+    "MS:1000522": BigInt64Array,
+    "MS:1000523": Float64Array,
+  };
+
+  static StringType = "MS:1001479";
+
+  static decode(states: Arrow.Vector) {
+    const namesArrow = states.getChild("name");
+    if (namesArrow == null)
+      throw new TypeError(`Auxiliary arrays must have a "name" field!`);
+    const names = Param.fromArrow(namesArrow);
+    const auxArrays = [];
+    for (let i = 0; i < names.length; i++) {
+      const nameOf = names[i];
+      const record: {
+        name: any;
+        data: Arrow.Vector;
+        data_type: string;
+        unit: string | null;
+        compression: string;
+        parameters: Arrow.Vector;
+      } = states.at(i).toJSON();
+      const valuesBytes = record.data.toArray();
+      const buf = new Uint8Array(valuesBytes.length);
+      buf.set(valuesBytes, 0);
+      const arrayType = AuxiliaryArrayBuilder.ArrayTypes[record.data_type];
+      let values;
+      if (arrayType) {
+        values = new arrayType(buf.buffer);
+      } else if (record.data_type == AuxiliaryArrayBuilder.StringType) {
+        const decoder = new TextDecoder("utf8");
+        values = decoder.decode(buf.buffer).split("\0");
+      } else {
+        throw Error(`Data type ${record.data_type} not implemented`);
+      }
+      const params = Param.fromArrow(record.parameters);
+      auxArrays.push(
+        new AuxiliaryArray(nameOf.name, values, params, record.unit),
+      );
+    }
+    return auxArrays;
   }
 }

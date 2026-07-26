@@ -8,6 +8,7 @@ export {
   RemoteBlob,
   ZipStorage
 } from "./store";
+
 export {
   ParquetTableNamespace,
   SpectrumMetadata,
@@ -22,19 +23,29 @@ export {
   InstrumentComponent,
   ProcessingMethod,
   Software,
-  SourceFile
+  SourceFile,
+
 } from "./metadata";
+
 export {
   Spectrum,
-  SelectedIon,
-  Precursor,
   Scan,
+  ScanWindow,
+  Precursor,
   IsolationWindow,
+  Activation,
+  SelectedIon,
   Chromatogram,
+  AuxiliaryArray,
   MetadataTree,
+  AuxiliaryArrayBuilder,
   ScanBuilder,
   SelectedIonBuilder,
   SpectrumBuilder,
+  PrecursorBuilder,
+  ChromatogramBuilder,
+  HasIonMobility,
+  ParamDescribed,
 } from "./record";
 export {
   DataArraysReader,

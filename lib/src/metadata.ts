@@ -56,7 +56,6 @@ export function wasmArrowToArrowJS(ffi: FFIStream): Arrow.Vector<Arrow.Struct> {
   else return chunks[0].concat(...chunks.slice(1));
 }
 
-
 export class Param {
   name: string;
   value: any | null = null;
@@ -358,8 +357,8 @@ abstract class MetadataReaderBase {
   metadataTrees: Map<string, MetadataTree>;
   /** Whether the {@link init} method has been called, which asynchronously loads data */
   initialized: boolean = false;
-  dataPointCountColumn: string | null
-  peakCountColumn: string | null
+  dataPointCountColumn: string | null;
+  peakCountColumn: string | null;
 
   /**
    * The basic constructor for {@link MetadataReaderBase} instances. This does not
@@ -375,12 +374,12 @@ abstract class MetadataReaderBase {
       this.metadataTrees.set(k, MetadataTree.fromMetadataMap(v));
     }
     this.initialized = false;
-    this.peakCountColumn = null
-    this.dataPointCountColumn = null
-    const root = this.metadataTrees.get(DataKindTag.Metadata)
-    this.dataPointCountColumn = root?.columnForCURIE(DATA_POINT_COUNT_ACC)?.[0] ?? null;
-    this.peakCountColumn =
-      root?.columnForCURIE(PEAK_COUNT_ACC)?.[0] ?? null;
+    this.peakCountColumn = null;
+    this.dataPointCountColumn = null;
+    const root = this.metadataTrees.get(DataKindTag.Metadata);
+    this.dataPointCountColumn =
+      root?.columnForCURIE(DATA_POINT_COUNT_ACC)?.[0] ?? null;
+    this.peakCountColumn = root?.columnForCURIE(PEAK_COUNT_ACC)?.[0] ?? null;
   }
 
   mappingsFor(kind: string) {
@@ -460,7 +459,6 @@ abstract class MetadataReaderBase {
     return this.initialized && this._mainStruct ? this._mainStruct.length : 0;
   }
 }
-
 
 export class ParquetTableNamespace {
   fileIndex: FileIndex;
@@ -680,7 +678,6 @@ export class SpectrumMetadata extends MetadataReaderBase {
     const self = new this(handle);
     return await self.init();
   }
-
 
   protected get _mainStruct() {
     return this._spectra;
@@ -938,78 +935,5 @@ export class ChromatogramMetadata extends MetadataReaderBase {
     }
 
     return chromatogramRecord;
-  }
-}
-
-export class AuxiliaryArray {
-  name: string;
-  values: Int32Array | Float32Array | Float64Array | BigInt64Array | string[];
-  parameters: Param[];
-  unit: string | null;
-
-  constructor(
-    name: string,
-    values: Int32Array | Float32Array | Float64Array | BigInt64Array | string[],
-    parameters?: Param[],
-    unit: string | null = null,
-  ) {
-    this.name = name;
-    this.values = values;
-    this.parameters = parameters || [];
-    this.unit = unit;
-  }
-}
-
-export class AuxiliaryArrayDecoder {
-  static ArrayTypes: Record<
-    string,
-    | Int32ArrayConstructor
-    | Float32ArrayConstructor
-    | BigInt64ArrayConstructor
-    | Float64ArrayConstructor
-  > = {
-    "MS:1000519": Int32Array,
-    "MS:1000521": Float32Array,
-    "MS:1000522": BigInt64Array,
-    "MS:1000523": Float64Array,
-  };
-
-  static StringType = "MS:1001479";
-
-  static decode(states: Arrow.Vector) {
-    const namesArrow = states.getChild("name");
-    if (namesArrow == null)
-      throw new TypeError(`Auxiliary arrays must have a "name" field!`);
-    const names = Param.fromArrow(namesArrow);
-    const auxArrays = [];
-    for (let i = 0; i < names.length; i++) {
-      const nameOf = names[i];
-      const record: {
-        name: any;
-        data: Arrow.Vector;
-        data_type: string;
-        unit: string | null;
-        compression: string;
-        parameters: Arrow.Vector;
-      } = states.at(i).toJSON();
-      const valuesBytes = record.data.toArray();
-      const buf = new Uint8Array(valuesBytes.length);
-      buf.set(valuesBytes, 0);
-      const arrayType = AuxiliaryArrayDecoder.ArrayTypes[record.data_type];
-      let values;
-      if (arrayType) {
-        values = new arrayType(buf.buffer);
-      } else if (record.data_type == AuxiliaryArrayDecoder.StringType) {
-        const decoder = new TextDecoder("utf8");
-        values = decoder.decode(buf.buffer).split("\0");
-      } else {
-        throw Error(`Data type ${record.data_type} not implemented`);
-      }
-      const params = Param.fromArrow(record.parameters);
-      auxArrays.push(
-        new AuxiliaryArray(nameOf.name, values, params, record.unit),
-      );
-    }
-    return auxArrays;
   }
 }
