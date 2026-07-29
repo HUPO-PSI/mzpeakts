@@ -460,6 +460,44 @@ abstract class MetadataReaderBase {
   }
 }
 
+
+const parquetHasColumn = (handle: ParquetFile, name: string) => {
+  return handle
+    .metadata()
+    .rowGroup(0)
+    .columns()
+    ?.find((c) => c.columnPath().join(".") == name) != undefined
+}
+
+
+const parquetColumnStatistics = (handle: ParquetFile, name: string) : {summary: {min_value: any, max_value: any}, rowGroups: any[]} | null => {
+  const meta = handle.metadata()
+  const rowGroups = []
+  let colIdx = null;
+  for(let i = 0; i < meta.numRowGroups(); i++) {
+    const rg = meta.rowGroup(i);
+    if (colIdx == null) {
+      const foundIdx = rg.columns().findIndex((c) => c.columnPath().join(".") == name);
+      if (foundIdx == -1) return null;
+      colIdx = foundIdx;
+    }
+    const col = rg.column(colIdx)
+    rowGroups.push(col.statistics())
+  }
+  const summary = rowGroups.reduce((state: {min_value: any, max_value: any}, colStats) => {
+    return {
+      min_value: state.min_value
+        ? Math.min(state.min_value, colStats.min_value)
+        : colStats.min_value,
+      max_value: state.max_value
+        ? Math.max(state.max_value, colStats.max_value)
+        : colStats.max_value,
+    };
+  }, {min_value: undefined, max_value: undefined})
+
+  return {summary, rowGroups}
+}
+
 export class ParquetTableNamespace {
   fileIndex: FileIndex;
   entityType: EntityType;
@@ -481,6 +519,52 @@ export class ParquetTableNamespace {
 
   hasMetadata() {
     return this.metadata != null;
+  }
+
+  facetHasColumn(facet: DataKindTag, name: string) {
+    switch (facet) {
+      case DataKindTag.Metadata:
+        return this.metadata ? parquetHasColumn(this.metadata, name) : false;
+      case DataKindTag.Precursors:
+        return this.precursors
+          ? parquetHasColumn(this.precursors, name)
+          : false;
+      case DataKindTag.SelectedIons:
+        return this.selectedIons
+          ? parquetHasColumn(this.selectedIons, name)
+          : false;
+      case DataKindTag.Scans:
+        return this.scans
+          ? parquetHasColumn(this.scans, name)
+          : false;
+      case DataKindTag.Products:
+        return this.products
+          ? parquetHasColumn(this.products, name)
+          : false;
+      default:
+        return false
+    }
+  }
+
+  facetColumnMinMaxes(facet: DataKindTag, name: string) {
+    switch (facet) {
+      case DataKindTag.Metadata:
+        return this.metadata ? parquetColumnStatistics(this.metadata, name) : null;
+      case DataKindTag.Precursors:
+        return this.precursors
+          ? parquetColumnStatistics(this.precursors, name)
+          : null;
+      case DataKindTag.SelectedIons:
+        return this.selectedIons
+          ? parquetColumnStatistics(this.selectedIons, name)
+          : null;
+      case DataKindTag.Scans:
+        return this.scans ? parquetColumnStatistics(this.scans, name) : null;
+      case DataKindTag.Products:
+        return this.products ? parquetColumnStatistics(this.products, name) : null;
+      default:
+        return null;
+    }
   }
 
   static async populateFromStorage<T>(
@@ -692,6 +776,29 @@ export class SpectrumMetadata extends MetadataReaderBase {
     this._selectedIons = await this.handle.readSelectedIons();
     this.initialized = true;
     return this;
+  }
+
+  /**
+   * Find the minimum (MS:1000528) and maximum (MS:1000527) m/z values across all spectra
+   * @returns The column min/max values or null aren't  available
+   */
+  mzRange(): { min: number | undefined; max: number | undefined } | null {
+    const metas = this.metadataTrees.get(DataKindTag.Metadata);
+    const lowCol = metas?.columnForCURIE("MS:1000528");
+    const hiCol = metas?.columnForCURIE("MS:1000527");
+    if (lowCol && hiCol) {
+      const low = this.handle.facetColumnMinMaxes(
+        DataKindTag.Metadata,
+        lowCol[0],
+      );
+      const hi = this.handle.facetColumnMinMaxes(
+        DataKindTag.Metadata,
+        hiCol[0],
+      );
+      return { min: low?.summary.min_value, max: hi?.summary.max_value };
+    } else {
+      return null;
+    }
   }
 
   /**

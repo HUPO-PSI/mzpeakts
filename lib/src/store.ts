@@ -101,12 +101,12 @@ export class MetadataColumn {
 
   constructor(
     name: string,
-    path: string[],
+    path: string[] | string,
     accession: string | null = null,
     unit: string | null = null,
   ) {
     this.name = name;
-    this.path = path;
+    this.path = (path instanceof String || typeof path === "string") ? path.split(".") : (path as string[]);
     this.accession = accession;
     this.unit = unit;
   }
