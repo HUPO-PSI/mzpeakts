@@ -220,7 +220,11 @@ export function encodeLinear(
     ints[0] = ints[1];
     ints[1] = ints[2];
     ints[2] = Math.trunc(data[i] * fixedPoint + 0.5);
-    const extrapol = (ints[1] + (ints[1] - ints[0])) | 0;
+    // Accumulate the extrapolation in full-precision JS arithmetic to match the
+    // 64-bit reference encoder (see the matching note in decodeLinear). `diff`
+    // is the small second difference and stays narrowed to a 32-bit int for
+    // encodeInt.
+    const extrapol = ints[1] + (ints[1] - ints[0]);
     const diff = (ints[2] - extrapol) | 0;
     halfByteCount += encodeInt(diff, halfBytes, halfByteCount);
 
@@ -279,8 +283,16 @@ export function decodeLinear(data: Uint8Array, dataSize: number, result: Appende
     ints[1] = ints[2];
     ints[2] = dec.next();
 
-    const extrapol = (ints[1] + (ints[1] - ints[0])) | 0;
-    const y = (extrapol + ints[2]) | 0;
+    // The reference C decoder accumulates these reconstructed integers in 64-bit
+    // (`long long`). The reconstructed value is `mz * fixedPoint`; with
+    // ProteoWizard's auto fixed point (~2^31 / lowest m/z in the chunk) the
+    // high-m/z points exceed 2^31, so a `| 0` truncation here wraps them to large
+    // NEGATIVE integers — yielding negative m/z. JS numbers are exact integers up
+    // to 2^53, well above any mz*fixedPoint (~1e11), so accumulate in plain
+    // (full-precision) JS arithmetic to match the 64-bit reference. (The per-step
+    // diff from dec.next() is a small second difference that still fits in 32 bits.)
+    const extrapol = ints[1] + (ints[1] - ints[0]);
+    const y = extrapol + ints[2];
     result.append(y / fixedPoint)
     ri++
     ints[2] = y;
@@ -319,7 +331,7 @@ export function encodePic(data: Float64Array, dataSize: number, result: Uint8Arr
   return ri;
 }
 
-export function decodePic(data: Uint8Array, dataSize: number, result: Float64Array): number {
+export function decodePic(data: Uint8Array, dataSize: number, result: Appender): number {
   let ri = 0;
   const dec = new IntDecoder(data, 0);
 
@@ -327,7 +339,8 @@ export function decodePic(data: Uint8Array, dataSize: number, result: Float64Arr
     if (dec.pos === dataSize - 1 && dec.half) {
       if ((data[dec.pos] & 0xf) !== 0x8) break;
     }
-    result[ri++] = dec.next();
+    result.append(dec.next());
+    ri++;
   }
 
   return ri;
