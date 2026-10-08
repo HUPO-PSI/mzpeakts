@@ -65,3 +65,4 @@ export * as data from "./data";
 export * as utils from "./utils"
 
 export * as ontology from "./ontology"
+export * as grid from "./grid"

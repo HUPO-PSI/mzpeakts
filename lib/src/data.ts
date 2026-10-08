@@ -14,6 +14,7 @@ import { FloatArray, IntArray } from "apache-arrow/type";
 import { bigIntToNumber } from "apache-arrow/util/bigint";
 import { betweenSorted, intervalOverlaps, Span1D, Span1DBigInt } from "./utils";
 import { decodeLinear, ACC_NUMPRESS_LINEAR, ACC_NUMPRESS_SLOF, ArrowArrayAppender as NumpressArrowAppender, decodeSlof } from "./numpress"
+import { gridFromParameters, GridLike } from "./grid";
 
 export type DataArrays = Record<string, FloatArray | IntArray | BigInt64Array | string[]>;
 
@@ -71,6 +72,7 @@ export const NULL_ZERO_CURIE = "MS:1003901";
 
 const NO_COMPRESSION_CURIE = "MS:1000576";
 const DELTA_CURIE = "MS:1003089";
+const GRID_ENCODING_CURIE = "MS:1003826";
 const NUMPRESS_LINEAR_CURIE = ACC_NUMPRESS_LINEAR;
 const NUMPRESS_SLOF_CURIE = ACC_NUMPRESS_SLOF;
 
@@ -442,7 +444,6 @@ export class DataArraysReaderMeta {
   ): Promise<DataArraysReaderMeta> {
     const pqMeta = handle.metadata();
     const nRowGroups = pqMeta.numRowGroups();
-    if (nRowGroups === 0) throw new Error("Empty Parquet file");
 
     // 1. Load ArrayIndex JSON from file key-value metadata
     const kvMeta = pqMeta.fileMetadata().keyValueMetadata() as Map<
@@ -457,72 +458,75 @@ export class DataArraysReaderMeta {
       );
     const arrayIndex = ArrayIndex.fromJSON(JSON.parse(arrayIndexJson));
 
-    // 2. Infer buffer format from first column path prefix
-    const firstColPath = pqMeta.rowGroup(0).column(0).columnPath().join(".");
-    let format: BufferFormat;
-    if (firstColPath.startsWith("point")) format = BufferFormat.Point;
-    else if (firstColPath.startsWith("chunk"))
-      format = BufferFormat.ChunkValues;
-    else throw new Error(`Root schema prefix "${firstColPath}" not recognized`);
+    if (nRowGroups > 0) {
+      // 2. Infer buffer format from first column path prefix
+      const firstColPath = pqMeta.rowGroup(0).column(0).columnPath().join(".");
+      let format: BufferFormat;
+      if (firstColPath.startsWith("point")) format = BufferFormat.Point;
+      else if (firstColPath.startsWith("chunk"))
+        format = BufferFormat.ChunkValues;
+      else throw new Error(`Root schema prefix "${firstColPath}" not recognized`);
 
-    // 3. Annotate schema indices from row group 0 column paths
-    const nCols = pqMeta.rowGroup(0).numColumns();
-    for (let i = 0; i < nCols; i++) {
-      let pathOf = pqMeta.rowGroup(0).column(i).columnPath().join(".");
-      if (pathOf.endsWith(".list.item"))
-        pathOf = pathOf.slice(0, -".list.item".length);
-      else if (pathOf.endsWith(".list.element"))
-        pathOf = pathOf.slice(0, -".list.element".length);
-      for (const entry of arrayIndex.entries) {
-        if (entry.path === pathOf) entry.schemaIndex = i;
-      }
-    }
+      // 3. Annotate schema indices from row group 0 column paths
+      const schemaRaw = handle.schema()
+      const schemaFFI = schemaRaw.intoFFI()
+      const schema = ArrowFFI.parseSchema(wasmMemory().buffer, schemaFFI.addr());
+      schemaFFI.free();
+      arrayIndex.annotateFromSchema(schema);
 
-    let pages = (pqMeta.columnIndexFor(0) as JsDataPage<number>[]).map(
-      (page) => {
-        return {
-          min:
-            page.min == null || page.min == undefined
-              ? undefined
-              : BigInt(page.min),
-          max:
-            page.max == null || page.max == undefined
-              ? undefined
-              : BigInt(page.max),
-          start_row: page.start_row,
-          null_count: page.null_count,
-          end_row: page.end_row,
-          row_group_index: page.row_group_index,
-        };
-      },
-    ) as JsDataPage<bigint>[];
+      let pages = (pqMeta.columnIndexFor(0) as JsDataPage<number>[]).map(
+        (page) => {
+          return {
+            min:
+              page.min == null || page.min == undefined
+                ? undefined
+                : BigInt(page.min),
+            max:
+              page.max == null || page.max == undefined
+                ? undefined
+                : BigInt(page.max),
+            start_row: page.start_row,
+            null_count: page.null_count,
+            end_row: page.end_row,
+            row_group_index: page.row_group_index,
+          };
+        },
+      ) as JsDataPage<bigint>[];
 
-    const rowGroupBounds: GroupTagBounds[] = [];
-    for (let i = 0; i < pqMeta.numRowGroups(); i++) {
-      let rg = pqMeta.rowGroup(i);
-      let idxCol = rg.column(0);
-      let stats: JsStatistics<number> | null = idxCol.statistics();
-      if (stats != null) {
-        if (stats.min_value != undefined && stats.max_value != undefined) {
-          rowGroupBounds.push(
-            new GroupTagBounds(
-              BigInt(i),
-              BigInt(stats.min_value),
-              BigInt(stats.max_value),
-            ),
-          );
+      const rowGroupBounds: GroupTagBounds[] = [];
+      for (let i = 0; i < pqMeta.numRowGroups(); i++) {
+        let rg = pqMeta.rowGroup(i);
+        let idxCol = rg.column(0);
+        let stats: JsStatistics<number> | null = idxCol.statistics();
+        if (stats != null) {
+          if (stats.min_value != undefined && stats.max_value != undefined) {
+            rowGroupBounds.push(
+              new GroupTagBounds(
+                BigInt(i),
+                BigInt(stats.min_value),
+                BigInt(stats.max_value),
+              ),
+            );
+          }
         }
       }
+      return new DataArraysReaderMeta(
+        context,
+        arrayIndex,
+        new RangeIndex(rowGroupBounds),
+        format,
+        null,
+        pages,
+      );
     }
-
-    return new DataArraysReaderMeta(
-      context,
-      arrayIndex,
-      new RangeIndex(rowGroupBounds),
-      format,
-      null,
-      pages,
-    );
+    else {
+      return new DataArraysReaderMeta(
+        context,
+        arrayIndex,
+        new RangeIndex([]),
+        arrayIndex.entries[0].bufferFormat,
+      )
+    }
   }
 
   findPageFor(index: bigint): { offset: number; limit: number | null } | null {
@@ -613,6 +617,105 @@ const lastNotNull = <T extends Arrow.DataType>(
   }
   return null;
 };
+
+
+class GridDecoder {
+  name: string;
+  gridType: Arrow.Vector<Arrow.Utf8>;
+  parameters: Arrow.Vector<Arrow.List<Arrow.Float64>>;
+  indices: Arrow.Vector<Arrow.List<Arrow.Uint32>>;
+  isDeltaEncoded: boolean;
+
+  constructor(
+    name: string,
+    gridType: Arrow.Vector<Arrow.Utf8>,
+    parameters: Arrow.Vector<Arrow.List<Arrow.Float64>>,
+    indices: Arrow.Vector<Arrow.List<Arrow.Uint32>>,
+    isDeltaEncoded: boolean,
+  ) {
+    this.name = name;
+    this.gridType = gridType;
+    this.parameters = parameters;
+    this.indices = indices;
+    this.isDeltaEncoded = isDeltaEncoded;
+  }
+
+  static fromArrow(gridColRoot: Arrow.Vector, entry: ArrayIndexEntry, isDeltaEncoded: boolean) {
+    const gridTypeArr = gridColRoot?.getChild("grid_type");
+    const gridParamArr = gridColRoot?.getChild("parameters");
+    const gridIndicesArr = gridColRoot?.getChild("indices");
+    if (gridTypeArr == null || gridParamArr == null || gridIndicesArr == null)
+      throw new Error(
+        `Grid encoding indicated but not found for ${entry.arrayName}`,
+      );
+    const gridCol = new GridDecoder(
+      entry.path,
+      gridTypeArr,
+      gridParamArr,
+      gridIndicesArr,
+      isDeltaEncoded,
+    );
+    return gridCol
+  }
+
+  decodeRow(index: number) {
+    const gridType = this.gridType.at(index);
+    if (gridType == null) return null;
+    const params = this.parameters.at(index);
+    if (params == null) return null;
+    const indices = this.indices.at(index);
+    if (indices == null) return null;
+    if (indices.nullCount > 0)
+      throw new Error("Cannot decode an array with nulls");
+    const grid = gridFromParameters(gridType, params.toArray());
+    if (this.isDeltaEncoded) {
+      const indicesReal = this.cumulativeSum(indices.toArray());
+      return this.processIndices(indicesReal, grid);
+    } else {
+      const indicesReal = indices.toArray();
+      return this.processIndices(indicesReal, grid);
+    }
+  }
+
+  processIndices(indicesReal: Uint32Array, grid: GridLike) {
+    const out = Arrow.makeBuilder({
+      type: new Arrow.Float64(),
+      nullValues: [null, undefined],
+    });
+    for (let i = 0; i < indicesReal.length; i++) {
+      out.append(grid.fromIndex(indicesReal[i]));
+    }
+    return out.finish().toVector();
+  }
+
+  decode() {
+    const chunks = [];
+    for (let i = 0; i < this.gridType.length; i++) {
+      const segment = this.decodeRow(i);
+      if (segment == null)
+        throw new Error(
+          `Index ${i} in ${this.name} grid decoder returned null!`,
+        );
+      chunks.push(segment);
+    }
+    if (chunks.length > 0) {
+      const first = chunks[0];
+      return first.concat(...chunks.slice(1));
+    } else {
+      return Arrow.makeVector(new Float64Array());
+    }
+  }
+
+  cumulativeSum(indices: Uint32Array) {
+    let offset = indices[0];
+    for (var i = 1; i < indices.length; i++) {
+      indices[i] += offset;
+      offset = indices[i];
+    }
+    return indices;
+  }
+}
+
 
 export class BaseLayoutReader {
   public arrayIndex: ArrayIndex;
@@ -889,6 +992,9 @@ export class ChunkLayoutReader extends BaseLayoutReader {
 
     let numpressLinearCol = null
     let numpressLinearColIdx = null
+    let gridCol = null;
+    let gridColIdx = null;
+    const gridColumns: Map<string, GridDecoder> = new Map();
     const visitedCols = new Set();
     for (const rowIdx of selectedRows) {
       visitedCols.clear()
@@ -939,12 +1045,28 @@ export class ChunkLayoutReader extends BaseLayoutReader {
           const acc = new NumpressArrowAppender();
           decodeLinear(buf.toArray(), buf.length, acc);
           decoded = acc.buildArrow();
-          throw new Error(`Unsupported Numpress Linear: ${encoding}`);
+          throw new Error("Not Numpress yet supported")
           break;
-        case NUMPRESS_SLOF_CURIE:
-          throw new Error(
-            `Numpress decoding not implemented (encoding: ${encoding})`,
+        case GRID_ENCODING_CURIE:
+          if (gridCol == null) {
+            const entriesOf = this.arrayIndex
+              .entriesFor(this.mainAxisEntry.arrayTypeCURIE)
+              .filter((e) => e.transform == GRID_ENCODING_CURIE);
+            const entryFor = entriesOf[0];
+            gridColIdx = entryFor.schemaIndex;
+            let gridColRoot = rootStruct.getChildAt(
+              entryFor.schemaIndex!,
+            );
+            visitedCols.add(gridColIdx);
+            if (gridColRoot == null) throw new Error(`Grid column for ${this.mainAxisEntry} not found`)
+            gridCol = GridDecoder.fromArrow(gridColRoot, this.mainAxisEntry, true)
+          }
+          const block = gridCol.decodeRow(rowIdx);
+          if (block == null) throw new Error(
+            `Grid encoding indicated but block was null at ${rowIdx} for ${this.mainAxisEntry.arrayName}`,
           );
+          decoded = block;
+          break;
         default:
           throw new Error(`Unknown chunk encoding: ${encoding}`);
       }
@@ -973,6 +1095,15 @@ export class ChunkLayoutReader extends BaseLayoutReader {
             buf,
           );
           resultSecondary[name].push(buf.buildArrow());
+        } else if (entry.transform == GRID_ENCODING_CURIE) {
+          let decoder = gridColumns.get(entry.path);
+          if (!decoder) {
+            decoder = GridDecoder.fromArrow(secVec, entry, false);
+            gridColumns.set(entry.path, decoder);
+          }
+          const block = decoder.decodeRow(rowIdx);
+          if (block != null)
+            resultSecondary[name].push(block);
         } else {
           resultSecondary[name].push(secValues);
         }
