@@ -1045,7 +1045,6 @@ export class ChunkLayoutReader extends BaseLayoutReader {
           const acc = new NumpressArrowAppender();
           decodeLinear(buf.toArray(), buf.length, acc);
           decoded = acc.buildArrow();
-          throw new Error("Not Numpress yet supported")
           break;
         case GRID_ENCODING_CURIE:
           if (gridCol == null) {

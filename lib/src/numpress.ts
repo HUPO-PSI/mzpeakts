@@ -149,7 +149,7 @@ export class IntDecoder {
       n = head;
     } else {
       n = head - 8;
-      const mask = 0xF0000000 | 0;
+      const mask = 0xF0000000;
       for (let i = 0; i < n; i++) {
         const m = (mask >> (4 * i)) | 0;
         res = (res | m) | 0;
@@ -279,8 +279,8 @@ export function decodeLinear(data: Uint8Array, dataSize: number, result: Appende
     ints[1] = ints[2];
     ints[2] = dec.next();
 
-    const extrapol = (ints[1] + (ints[1] - ints[0])) | 0;
-    const y = (extrapol + ints[2]) | 0;
+    const extrapol = (ints[1] + (ints[1] - ints[0])) //| 0;
+    const y = (extrapol + ints[2]) //| 0;
     result.append(y / fixedPoint)
     ri++
     ints[2] = y;

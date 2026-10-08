@@ -122,52 +122,47 @@ test("grid reader", async () => {
 })
 
 
-// test("numpress reader", async () => {
-//     const blob = await fs.openAsBlob("static/small.numpress.mzpeak");
-//     const reader = await MzPeakReader.fromBlob(blob);
-//     expect.assert(reader.length == 48, "Incorrect number of spectra")
-//     for (let [index, size, msLevel] of INDEX_SIZE_MSLEVEL) {
-//       const response = await reader.get(index);
-//       expect.assert(response != null);
-//       expect.assert(response.msLevel == msLevel);
-//       expect.assert(response.index == BigInt(index));
-//       if (response.isProfile) {
-//         expect.assert(response.dataArrays);
-//         const mzArray = response.dataArrays["m/z array"] as Float64Array;
-//         expect.assert(mzArray.length == size);
-//         expect.assert(mzArray.every((v) => v > 0.0));
-//         expect.assert(
-//           mzArray.every((v, i, arr) => {
-//             if (i == 0) {
-//               return true;
-//             } else {
-//               return v >= arr[i - 1];
-//             }
-//           }),
-//         );
+test("numpress reader", async () => {
+    const blob = await fs.openAsBlob("static/small.numpress.mzpeak");
+    const reader = await MzPeakReader.fromBlob(blob);
+    expect.assert(reader.length == 48, "Incorrect number of spectra")
+    for (let [index, size, msLevel] of INDEX_SIZE_MSLEVEL) {
+      const response = await reader.get(index);
+      expect.assert(response != null);
+      expect.assert(response.msLevel == msLevel);
+      expect.assert(response.index == BigInt(index));
+      if (response.isProfile) {
+        expect.assert(response.dataArrays);
+        const mzArray = response.dataArrays["m/z array"] as Float64Array;
+        expect.assert(mzArray.length == size);
+        expect.assert(mzArray.every((v) => v > 0.0));
+        expect.assert(
+          mzArray.every((v, i, arr) => {
+            if (i == 0) {
+              return true;
+            } else {
+              return v >= arr[i - 1];
+            }
+          }),
+        );
+      } else {
+        const peaks = response.centroidPeaks();
+        expect.assert(peaks);
 
-//         expect.assert(
-//           response.centroidPeaks()?.length ?? 0 > 0,
-//           `${response.index}/${index} ${response.centroids} did not have a nonzero length`,
-//         );
-//       } else {
-//         const peaks = response.centroidPeaks();
-//         expect.assert(peaks);
-
-//         expect.assert(peaks.length == size);
-//         expect.assert(peaks.every((v) => v.mz > 0.0));
-//         expect.assert(
-//           peaks.every((v, i, arr) => {
-//             if (i == 0) {
-//               return true;
-//             } else {
-//               return v.mz >= arr[i - 1].mz;
-//             }
-//           }),
-//         );
-//       }
-//     }
-// })
+        expect.assert(peaks.length == size);
+        expect.assert(peaks.every((v) => v.mz > 0.0));
+        expect.assert(
+          peaks.every((v, i, arr) => {
+            if (i == 0) {
+              return true;
+            } else {
+              return v.mz >= arr[i - 1].mz;
+            }
+          }),
+        );
+      }
+    }
+})
 
 
 test("point layout reader", async () => {
