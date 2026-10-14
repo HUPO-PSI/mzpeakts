@@ -110,7 +110,7 @@ export class MetadataColumn {
   ) {
     this.name = name;
     this.path =
-      path instanceof String || typeof path === "string"
+      (path instanceof String || typeof path === "string")
         ? path.split(".")
         : (path as string[]);
     this.accession = accession;
