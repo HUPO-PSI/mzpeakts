@@ -263,29 +263,37 @@ export class Sample extends ParamDescribed {
 export class MSRun {
   id: string;
   defaultDataProcessingId?: string;
-  defaultInstrumentId?: number;
+  defaultInstrumentConfigurationId?: number;
   defaultSourceFileId?: string;
   startTime?: Date;
 
   constructor(
     id: string,
     defaultDataProcessingId?: string,
-    defaultInstrumentId?: number,
+    defaultInstrumentConfigurationId?: number,
     defaultSourceFileId?: string,
     startTime?: Date,
   ) {
     this.id = id;
     this.defaultDataProcessingId = defaultDataProcessingId;
-    this.defaultInstrumentId = defaultInstrumentId;
+    this.defaultInstrumentConfigurationId = defaultInstrumentConfigurationId;
     this.defaultSourceFileId = defaultSourceFileId;
     this.startTime = startTime;
+  }
+
+  get defaultInstrumentId() {
+    return this.defaultInstrumentConfigurationId;
+  }
+
+  set defaultInstrumentId(value: number | undefined) {
+    this.defaultInstrumentConfigurationId = value;
   }
 
   static fromJSON(raw: any) {
     return new MSRun(
       raw.id,
       raw.default_data_processing_id,
-      raw.default_instrument_id,
+      raw.default_instrument_id || raw.default_instrument_configuration_id,
       raw.default_source_file_id,
       raw.start_time ? new Date(raw.start_time) : undefined,
     );
@@ -460,43 +468,51 @@ abstract class MetadataReaderBase {
   }
 }
 
-
 const parquetHasColumn = (handle: ParquetFile, name: string) => {
-  return handle
-    .metadata()
-    .rowGroup(0)
-    .columns()
-    ?.find((c) => c.columnPath().join(".") == name) != undefined
-}
+  return (
+    handle
+      .metadata()
+      .rowGroup(0)
+      .columns()
+      ?.find((c) => c.columnPath().join(".") == name) != undefined
+  );
+};
 
-
-const parquetColumnStatistics = (handle: ParquetFile, name: string) : {summary: {min_value: any, max_value: any}, rowGroups: any[]} | null => {
-  const meta = handle.metadata()
-  const rowGroups = []
+const parquetColumnStatistics = (
+  handle: ParquetFile,
+  name: string,
+): { summary: { min_value: any; max_value: any }; rowGroups: any[] } | null => {
+  const meta = handle.metadata();
+  const rowGroups = [];
   let colIdx = null;
-  for(let i = 0; i < meta.numRowGroups(); i++) {
+  for (let i = 0; i < meta.numRowGroups(); i++) {
     const rg = meta.rowGroup(i);
     if (colIdx == null) {
-      const foundIdx = rg.columns().findIndex((c) => c.columnPath().join(".") == name);
+      const foundIdx = rg
+        .columns()
+        .findIndex((c) => c.columnPath().join(".") == name);
       if (foundIdx == -1) return null;
       colIdx = foundIdx;
     }
-    const col = rg.column(colIdx)
-    rowGroups.push(col.statistics())
+    const col = rg.column(colIdx);
+    rowGroups.push(col.statistics());
   }
-  const summary = rowGroups.reduce((state: {min_value: any, max_value: any}, colStats) => {
-    return {
-      min_value: state.min_value
-        ? Math.min(state.min_value, colStats.min_value)
-        : colStats.min_value,
-      max_value: state.max_value
-        ? Math.max(state.max_value, colStats.max_value)
-        : colStats.max_value,
-    };
-  }, {min_value: undefined, max_value: undefined})
+  const summary = rowGroups.reduce(
+    (state: { min_value: any; max_value: any }, colStats) => {
+      return {
+        min_value: state.min_value
+          ? Math.min(state.min_value, colStats.min_value)
+          : colStats.min_value,
+        max_value: state.max_value
+          ? Math.max(state.max_value, colStats.max_value)
+          : colStats.max_value,
+      };
+    },
+    { min_value: undefined, max_value: undefined },
+  );
 
-  return {summary, rowGroups}
-}
+  return { summary, rowGroups };
+};
 
 export class ParquetTableNamespace {
   fileIndex: FileIndex;
@@ -534,22 +550,20 @@ export class ParquetTableNamespace {
           ? parquetHasColumn(this.selectedIons, name)
           : false;
       case DataKindTag.Scans:
-        return this.scans
-          ? parquetHasColumn(this.scans, name)
-          : false;
+        return this.scans ? parquetHasColumn(this.scans, name) : false;
       case DataKindTag.Products:
-        return this.products
-          ? parquetHasColumn(this.products, name)
-          : false;
+        return this.products ? parquetHasColumn(this.products, name) : false;
       default:
-        return false
+        return false;
     }
   }
 
   facetColumnMinMaxes(facet: DataKindTag, name: string) {
     switch (facet) {
       case DataKindTag.Metadata:
-        return this.metadata ? parquetColumnStatistics(this.metadata, name) : null;
+        return this.metadata
+          ? parquetColumnStatistics(this.metadata, name)
+          : null;
       case DataKindTag.Precursors:
         return this.precursors
           ? parquetColumnStatistics(this.precursors, name)
@@ -561,7 +575,9 @@ export class ParquetTableNamespace {
       case DataKindTag.Scans:
         return this.scans ? parquetColumnStatistics(this.scans, name) : null;
       case DataKindTag.Products:
-        return this.products ? parquetColumnStatistics(this.products, name) : null;
+        return this.products
+          ? parquetColumnStatistics(this.products, name)
+          : null;
       default:
         return null;
     }
@@ -809,13 +825,13 @@ export class SpectrumMetadata extends MetadataReaderBase {
   loadSpacingModelIndex(): Map<bigint, SpacingInterpolationModel> | null {
     if (this.spectra === null) return null;
     const indexArr = this.spectra.getChildAt(0) as Arrow.Vector<Arrow.Uint64>;
-    let spacingModels = this.spectra.getChild(
-      "mz_delta_model",
-    ) as Arrow.Vector<Arrow.List<Arrow.Float64>> | null;
+    let spacingModels = this.spectra.getChild("mz_delta_model") as Arrow.Vector<
+      Arrow.List<Arrow.Float64>
+    > | null;
     if (spacingModels == null)
-      spacingModels = this.spectra.getChild("coordinate_spacing_model") as Arrow.Vector<
-        Arrow.List<Arrow.Float64>
-      > | null;
+      spacingModels = this.spectra.getChild(
+        "coordinate_spacing_model",
+      ) as Arrow.Vector<Arrow.List<Arrow.Float64>> | null;
     if (spacingModels == null) return null;
     const modelIndex = new Map();
     for (let i = 0; i < indexArr.length; i++) {
