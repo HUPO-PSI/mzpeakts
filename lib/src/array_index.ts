@@ -8,6 +8,7 @@ export enum BufferFormat {
   ChunkEncoding = "chunk_encoding",
   ChunkSecondary = "chunk_secondary",
   ChunkTransform = "chunk_transform",
+  Index = "index"
 }
 
 export function bufferFormatFromString(s: string): BufferFormat {
@@ -27,6 +28,8 @@ export function bufferFormatFromString(s: string): BufferFormat {
       return BufferFormat.ChunkSecondary;
     case "chunk_transform":
       return BufferFormat.ChunkTransform;
+    case "index":
+      return BufferFormat.Index;
     default:
       throw new Error(`${s} is not a recognized buffer format`);
   }
@@ -152,6 +155,10 @@ export class ArrayIndexEntry {
       this.transform === other.transform &&
       this.unitCURIE === other.unitCURIE
     );
+  }
+
+  isIndex() {
+    return this.bufferFormat == BufferFormat.Index
   }
 
   get fieldName() {
